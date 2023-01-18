@@ -37,8 +37,8 @@ for orientation in ExifTags.TAGS.keys():
 
 def img2label_paths(img_paths):
     # Define label paths as a function of image paths
-    sa, sb = f"{os.sep}images{os.sep}", f"{os.sep}labels{os.sep}"  # /images/, /labels/ substrings
-    return [sb.join(x.rsplit(sa, 1)).rsplit(".", 1)[0] + ".txt" for x in img_paths]
+    sa, sb = os.sep + 'images' + os.sep, os.sep + 'labels' + os.sep + "coco_wholebody_" # /images/, /labels/ substrings
+    return ['txt'.join(x.replace(sa, sb, 1).rsplit(x.split('.')[-1], 1)) for x in img_paths]
 
 
 def get_hash(paths):
@@ -84,10 +84,11 @@ def verify_image_label(args):
             nf = 1  # label found
             with open(lb_file) as f:
                 lb = [x.split() for x in f.read().strip().splitlines() if len(x)]
-                if any(len(x) > 6 for x in lb) and (not keypoint):  # is segment
-                    classes = np.array([x[0] for x in lb], dtype=np.float32)
-                    segments = [np.array(x[1:], dtype=np.float32).reshape(-1, 2) for x in lb]  # (cls, xy1...)
-                    lb = np.concatenate((classes.reshape(-1, 1), segments2boxes(segments)), 1)  # (cls, xywh)
+                lb = np.array([x[0:6] for x in lb], dtype=np.float32) ## hand detectoin 
+                # if any(len(x) > 6 for x in lb) and (not keypoint):  # is segment
+                #     classes = np.array([x[0] for x in lb], dtype=np.float32)
+                #     segments = [np.array(x[1:], dtype=np.float32).reshape(-1, 2) for x in lb]  # (cls, xy1...)
+                #     lb = np.concatenate((classes.reshape(-1, 1), segments2boxes(segments)), 1)  # (cls, xywh)
                 lb = np.array(lb, dtype=np.float32)
             nl = len(lb)
             if nl:
@@ -103,10 +104,9 @@ def verify_image_label(args):
                     lb = kpts
                     assert lb.shape[1] == 39, "labels require 39 columns each after removing occlusion parameter"
                 else:
-                    assert lb.shape[1] == 5, f"labels require 5 columns, {lb.shape[1]} columns detected"
-                    assert (lb >= 0).all(), f"negative label values {lb[lb < 0]}"
-                    assert (lb[:, 1:] <=
-                            1).all(), f"non-normalized or out of bounds coordinates {lb[:, 1:][lb[:, 1:] > 1]}"
+                    assert lb.shape[1] == 5+1, f'labels require 5 columns, {lb.shape[1]} columns detected'
+                    assert (lb[:, :5] >= 0).all(), f'negative label values {lb[lb < 0]}'
+                    assert (lb[:, 1:5] <= 1).all(), f'non-normalized or out of bounds coordinates {lb[:, 1:][lb[:, 1:] > 1]}'
                 _, i = np.unique(lb, axis=0, return_index=True)
                 if len(i) < nl:  # duplicate row check
                     lb = lb[i]  # remove duplicates
@@ -115,13 +115,13 @@ def verify_image_label(args):
                     msg = f"{prefix}WARNING ⚠️ {im_file}: {nl - len(i)} duplicate labels removed"
             else:
                 ne = 1  # label empty
-                lb = np.zeros((0, 39), dtype=np.float32) if keypoint else np.zeros((0, 5), dtype=np.float32)
+                lb = np.zeros((0, 39), dtype=np.float32) if keypoint else np.zeros((0, 5+1), dtype=np.float32)
         else:
             nm = 1  # label missing
-            lb = np.zeros((0, 39), dtype=np.float32) if keypoint else np.zeros((0, 5), dtype=np.float32)
+            lb = np.zeros((0, 39), dtype=np.float32) if keypoint else np.zeros((0, 5+1), dtype=np.float32)
         if keypoint:
             keypoints = lb[:, 5:].reshape(-1, 17, 2)
-        lb = lb[:, :5]
+        lb = lb[:, :5+1]
         return im_file, lb, shape, segments, keypoints, nm, nf, ne, nc, msg
     except Exception as e:
         nc = 1
@@ -208,7 +208,7 @@ def check_dataset_yaml(data, autodownload=True):
     data['nc'] = len(data['names'])
 
     # Resolve paths
-    path = Path(extract_dir or data.get('path') or '')  # optional 'path' default to '.'
+    path = Path().absolute() # Path(extract_dir or data.get('path') or '')  # optional 'path' default to '.'
     if not path.is_absolute():
         path = (DATASETS_DIR / path).resolve()
         data['path'] = path  # download scripts

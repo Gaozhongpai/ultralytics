@@ -177,6 +177,7 @@ def save_one_box(xyxy, im, file=Path('im.jpg'), gain=1.02, pad=10, square=False,
 def plot_images(images,
                 batch_idx,
                 cls,
+                rot,
                 bboxes,
                 masks=np.zeros(0, dtype=np.uint8),
                 paths=None,
@@ -187,6 +188,8 @@ def plot_images(images,
         images = images.cpu().float().numpy()
     if isinstance(cls, torch.Tensor):
         cls = cls.cpu().numpy()
+    if isinstance(rot, torch.Tensor):
+        rot = rot.cpu().numpy()
     if isinstance(bboxes, torch.Tensor):
         bboxes = bboxes.cpu().numpy()
     if isinstance(masks, torch.Tensor):
@@ -231,6 +234,7 @@ def plot_images(images,
 
             boxes = xywh2xyxy(bboxes[idx, :4]).T
             classes = cls[idx].astype('int')
+            rotations = rot[idx].astype('float') * 180
             labels = bboxes.shape[1] == 4  # labels if no conf column
             conf = None if labels else bboxes[idx, 4]  # check for confidence presence (label vs pred)
 
@@ -244,10 +248,12 @@ def plot_images(images,
             boxes[[1, 3]] += y
             for j, box in enumerate(boxes.T.tolist()):
                 c = classes[j]
+                r = rotations[j]
                 color = colors(c)
                 c = names[c] if names else c
                 if labels or conf[j] > 0.25:  # 0.25 conf thresh
-                    label = f'{c}' if labels else f'{c} {conf[j]:.1f}'
+                    # label = f'{c}' if labels else f'{c} {conf[j]:.1f}'
+                    label = '%s %.1f' % (c, r) if labels else '%s %.1f %.1f' % (c, r, conf[j])
                     annotator.box_label(box, label, color=color)
 
             # Plot masks
@@ -313,8 +319,8 @@ def output_to_target(output, max_det=300):
     # Convert model output to target format [batch_id, class_id, x, y, w, h, conf] for plotting
     targets = []
     for i, o in enumerate(output):
-        box, conf, cls = o[:max_det, :6].cpu().split((4, 1, 1), 1)
+        box, conf, cls, rot = o[:max_det, :7].cpu().split((4, 1, 1, 1), 1)
         j = torch.full((conf.shape[0], 1), i)
-        targets.append(torch.cat((j, cls, xyxy2xywh(box), conf), 1))
+        targets.append(torch.cat((j, cls, rot, xyxy2xywh(box), conf), 1))
     targets = torch.cat(targets, 0).numpy()
-    return targets[:, 0], targets[:, 1], targets[:, 2:]
+    return targets[:, 0], targets[:, 1],  targets[:, 2], targets[:, 3:7]

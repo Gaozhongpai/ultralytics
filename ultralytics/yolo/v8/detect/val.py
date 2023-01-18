@@ -31,7 +31,7 @@ class DetectionValidator(BaseValidator):
     def preprocess(self, batch):
         batch["img"] = batch["img"].to(self.device, non_blocking=True)
         batch["img"] = (batch["img"].half() if self.args.half else batch["img"].float()) / 255
-        for k in ["batch_idx", "cls", "bboxes"]:
+        for k in ["batch_idx", "cls", 'rot', "bboxes"]:
             batch[k] = batch[k].to(self.device)
 
         nb = len(batch["img"])
@@ -73,6 +73,7 @@ class DetectionValidator(BaseValidator):
         for si, pred in enumerate(preds):
             idx = batch["batch_idx"] == si
             cls = batch["cls"][idx]
+            rot = batch["rot"][idx]
             bbox = batch["bboxes"][idx]
             nl, npr = cls.shape[0], pred.shape[0]  # number of labels, predictions
             shape = batch["ori_shape"][si]
@@ -182,6 +183,7 @@ class DetectionValidator(BaseValidator):
         plot_images(batch["img"],
                     batch["batch_idx"],
                     batch["cls"].squeeze(-1),
+                    batch["rot"].squeeze(-1),
                     batch["bboxes"],
                     paths=batch["im_file"],
                     fname=self.save_dir / f"val_batch{ni}_labels.jpg",
@@ -204,7 +206,8 @@ class DetectionValidator(BaseValidator):
                 'image_id': image_id,
                 'category_id': self.class_map[int(p[5])],
                 'bbox': [round(x, 3) for x in b],
-                'score': round(p[4], 5)})
+                'score': round(p[4], 5),
+                'score': round(p[6], 2)})
 
     def eval_json(self, stats):
         if self.args.save_json and self.is_coco and len(self.jdict):

@@ -35,7 +35,7 @@ from ultralytics.yolo.utils.ops import clean_str, segments2boxes, xyn2xy, xywh2x
 from ultralytics.yolo.utils.torch_utils import torch_distributed_zero_first
 
 from .v5augmentations import (Albumentations, augment_hsv, classify_albumentations, classify_transforms, copy_paste,
-                              letterbox, mixup, random_perspective)
+                              letterbox, mixup, random_perspective, box_candidates)
 
 # Parameters
 HELP_URL = 'See https://github.com/ultralytics/yolov5/wiki/Train-Custom-Data'
@@ -431,8 +431,8 @@ class LoadStreams:
 
 def img2label_paths(img_paths):
     # Define label paths as a function of image paths
-    sa, sb = f'{os.sep}images{os.sep}', f'{os.sep}labels{os.sep}'  # /images/, /labels/ substrings
-    return [sb.join(x.rsplit(sa, 1)).rsplit('.', 1)[0] + '.txt' for x in img_paths]
+    sa, sb = os.sep + 'images' + os.sep, os.sep + 'labels' + os.sep + "coco_wholebody_" # /images/, /labels/ substrings
+    return ['txt'.join(x.replace(sa, sb, 1).rsplit(x.split('.')[-1], 1)) for x in img_paths]
 
 
 class LoadImagesAndLabels(Dataset):
@@ -679,7 +679,9 @@ class LoadImagesAndLabels(Dataset):
 
             labels = self.labels[index].copy()
             if labels.size:  # normalized xywh to pixel xyxy format
-                labels[:, 1:] = xywhn2xyxy(labels[:, 1:], ratio[0] * w, ratio[1] * h, padw=pad[0], padh=pad[1])
+                labels[:, 1:5] = xywhn2xyxy(labels[:, 1:5], ratio[0] * w, ratio[1] * h, padw=pad[0], padh=pad[1])
+            i = box_candidates(cls=labels[:, 0], box1=labels[:, 1:5].T, box2=labels[:, 1:5].T, area_thr=0.1)
+            labels = labels[i]
 
             if self.augment:
                 img, labels = random_perspective(img,
@@ -693,7 +695,9 @@ class LoadImagesAndLabels(Dataset):
         nl = len(labels)  # number of labels
         if nl:
             labels[:, 1:5] = xyxy2xywhn(labels[:, 1:5], w=img.shape[1], h=img.shape[0], clip=True, eps=1E-3)
-
+            
+        rotations = labels[:, 5:6] / 180
+        labels = labels[:, :5]
         if self.augment:
             # Albumentations
             img, labels = self.albumentations(img, labels)
@@ -707,20 +711,28 @@ class LoadImagesAndLabels(Dataset):
                 img = np.flipud(img)
                 if nl:
                     labels[:, 2] = 1 - labels[:, 2]
+                    rotations[:, 0] = - rotations[:, 0]
+                    for ll in range(nl):
+                        labels[ll, 0] = 0 if labels[ll, 0]==0 else 3 - labels[ll, 0]
 
             # Flip left-right
             if random.random() < hyp['fliplr']:
                 img = np.fliplr(img)
                 if nl:
                     labels[:, 1] = 1 - labels[:, 1]
+                    rotations[:, 0] = - rotations[:, 0]
+                    for ll in range(nl):
+                        labels[ll, 0] = 0 if labels[ll, 0]==0 else 3 - labels[ll, 0] 
 
             # Cutouts
             # labels = cutout(img, labels, p=0.5)
             # nl = len(labels)  # update after cutout
-
-        labels_out = torch.zeros((nl, 6))
+        
+        labels_out = torch.zeros((nl, 1+1+4+1))
+        # labels_out = torch.zeros((nl, 6))
         if nl:
-            labels_out[:, 1:] = torch.from_numpy(labels)
+            labels_out[:, 1:6] = torch.from_numpy(labels)
+            labels_out[:, 6:7] = torch.from_numpy(rotations)
 
         # Convert
         img = img.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
@@ -784,14 +796,14 @@ class LoadImagesAndLabels(Dataset):
             # Labels
             labels, segments = self.labels[index].copy(), self.segments[index].copy()
             if labels.size:
-                labels[:, 1:] = xywhn2xyxy(labels[:, 1:], w, h, padw, padh)  # normalized xywh to pixel xyxy format
+                labels[:, 1:5] = xywhn2xyxy(labels[:, 1:5], w, h, padw, padh)  # normalized xywh to pixel xyxy format
                 segments = [xyn2xy(x, w, h, padw, padh) for x in segments]
             labels4.append(labels)
             segments4.extend(segments)
 
         # Concat/clip labels
         labels4 = np.concatenate(labels4, 0)
-        for x in (labels4[:, 1:], *segments4):
+        for x in (labels4[:, 1:5], *segments4):
             np.clip(x, 0, 2 * s, out=x)  # clip when using random_perspective()
         # img4, labels4 = replicate(img4, labels4)  # replicate
 
@@ -848,7 +860,7 @@ class LoadImagesAndLabels(Dataset):
             # Labels
             labels, segments = self.labels[index].copy(), self.segments[index].copy()
             if labels.size:
-                labels[:, 1:] = xywhn2xyxy(labels[:, 1:], w, h, padx, pady)  # normalized xywh to pixel xyxy format
+                labels[:, 1:5] = xywhn2xyxy(labels[:, 1:5], w, h, padx, pady)  # normalized xywh to pixel xyxy format
                 segments = [xyn2xy(x, w, h, padx, pady) for x in segments]
             labels9.append(labels)
             segments9.extend(segments)
@@ -868,7 +880,7 @@ class LoadImagesAndLabels(Dataset):
         c = np.array([xc, yc])  # centers
         segments9 = [x - c for x in segments9]
 
-        for x in (labels9[:, 1:], *segments9):
+        for x in (labels9[:, 1:5], *segments9):
             np.clip(x, 0, 2 * s, out=x)  # clip when using random_perspective()
         # img9, labels9 = replicate(img9, labels9)  # replicate
 
@@ -892,7 +904,7 @@ class LoadImagesAndLabels(Dataset):
         im, label, path, shapes = zip(*batch)  # transposed
         for i, lb in enumerate(label):
             lb[:, 0] = i  # add target image index for build_targets()
-        batch_idx, cls, bboxes = torch.cat(label, 0).split((1, 1, 4), dim=1)
+        batch_idx, cls, bboxes, rotations = torch.cat(label, 0).split((1, 1, 4, 1), dim=1)
         return {
             'ori_shape': tuple((x[0] if x else None) for x in shapes),
             'ratio_pad': tuple((x[1] if x else None) for x in shapes),
@@ -900,6 +912,7 @@ class LoadImagesAndLabels(Dataset):
             'img': torch.stack(im, 0),
             'cls': cls,
             'bboxes': bboxes,
+            'rot': rotations,
             'batch_idx': batch_idx.view(-1)}
 
     @staticmethod
@@ -1005,16 +1018,17 @@ def verify_image_label(args):
             nf = 1  # label found
             with open(lb_file) as f:
                 lb = [x.split() for x in f.read().strip().splitlines() if len(x)]
-                if any(len(x) > 6 for x in lb):  # is segment
-                    classes = np.array([x[0] for x in lb], dtype=np.float32)
-                    segments = [np.array(x[1:], dtype=np.float32).reshape(-1, 2) for x in lb]  # (cls, xy1...)
-                    lb = np.concatenate((classes.reshape(-1, 1), segments2boxes(segments)), 1)  # (cls, xywh)
-                lb = np.array(lb, dtype=np.float32)
+                lb = np.array([x[0:6] for x in lb], dtype=np.float32) ## hand detectoin 
+                # if any(len(x) > 6 for x in lb):  # is segment
+                #     classes = np.array([x[0] for x in lb], dtype=np.float32)
+                #     segments = [np.array(x[1:], dtype=np.float32).reshape(-1, 2) for x in lb]  # (cls, xy1...)
+                #     lb = np.concatenate((classes.reshape(-1, 1), segments2boxes(segments)), 1)  # (cls, xywh)
+                # lb = np.array(lb, dtype=np.float32)
             nl = len(lb)
             if nl:
-                assert lb.shape[1] == 5, f'labels require 5 columns, {lb.shape[1]} columns detected'
-                assert (lb >= 0).all(), f'negative label values {lb[lb < 0]}'
-                assert (lb[:, 1:] <= 1).all(), f'non-normalized or out of bounds coordinates {lb[:, 1:][lb[:, 1:] > 1]}'
+                assert lb.shape[1] == 5+1, f'labels require 5 columns, {lb.shape[1]} columns detected'
+                assert (lb[:, :5] >= 0).all(), f'negative label values {lb[lb < 0]}'
+                assert (lb[:, 1:5] <= 1).all(), f'non-normalized or out of bounds coordinates {lb[:, 1:][lb[:, 1:] > 1]}'
                 _, i = np.unique(lb, axis=0, return_index=True)
                 if len(i) < nl:  # duplicate row check
                     lb = lb[i]  # remove duplicates
@@ -1023,10 +1037,10 @@ def verify_image_label(args):
                     msg = f'{prefix}WARNING ⚠️ {im_file}: {nl - len(i)} duplicate labels removed'
             else:
                 ne = 1  # label empty
-                lb = np.zeros((0, 5), dtype=np.float32)
+                lb = np.zeros((0, 5+1), dtype=np.float32)
         else:
             nm = 1  # label missing
-            lb = np.zeros((0, 5), dtype=np.float32)
+            lb = np.zeros((0, 5+1), dtype=np.float32)
         return im_file, lb, shape, segments, nm, nf, ne, nc, msg
     except Exception as e:
         nc = 1

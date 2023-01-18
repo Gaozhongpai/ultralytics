@@ -232,7 +232,7 @@ def random_perspective(im,
             new[:, [1, 3]] = new[:, [1, 3]].clip(0, height)
 
         # filter candidates
-        i = box_candidates(box1=targets[:, 1:5].T * s, box2=new.T, area_thr=0.01 if use_segments else 0.10)
+        i = box_candidates(cls=targets[:, 0], box1=targets[:, 1:5].T * s, box2=new.T, area_thr=0.1 if use_segments else 0.10)
         targets = targets[i]
         targets[:, 1:5] = new[i]
 
@@ -299,13 +299,23 @@ def mixup(im, labels, im2, labels2):
     return im, labels
 
 
-def box_candidates(box1, box2, wh_thr=2, ar_thr=100, area_thr=0.1, eps=1e-16):  # box1(4,n), box2(4,n)
+def box_candidates(cls, box1, box2, wh_thr=10, ar_thr=10, area_thr=0.1, eps=1e-16):  # box1(4,n), box2(4,n)
     # Compute candidate boxes: box1 before augment, box2 after augment, wh_thr (pixels), aspect_ratio_thr, area_ratio
     w1, h1 = box1[2] - box1[0], box1[3] - box1[1]
     w2, h2 = box2[2] - box2[0], box2[3] - box2[1]
+    
+    wh_thr = np.ones_like(w1)*wh_thr ## hand
+    wh_thr[cls==0] = wh_thr[cls==0] * 4 ## body
+
     ar = np.maximum(w2 / (h2 + eps), h2 / (w2 + eps))  # aspect ratio
     return (w2 > wh_thr) & (h2 > wh_thr) & (w2 * h2 / (w1 * h1 + eps) > area_thr) & (ar < ar_thr)  # candidates
 
+# def box_candidates(box1, box2, wh_thr=2, ar_thr=100, area_thr=0.1, eps=1e-16):  # box1(4,n), box2(4,n)
+#     # Compute candidate boxes: box1 before augment, box2 after augment, wh_thr (pixels), aspect_ratio_thr, area_ratio
+#     w1, h1 = box1[2] - box1[0], box1[3] - box1[1]
+#     w2, h2 = box2[2] - box2[0], box2[3] - box2[1]
+#     ar = np.maximum(w2 / (h2 + eps), h2 / (w2 + eps))  # aspect ratio
+#     return (w2 > wh_thr) & (h2 > wh_thr) & (w2 * h2 / (w1 * h1 + eps) > area_thr) & (ar < ar_thr)  # candidates
 
 def classify_albumentations(
         augment=True,

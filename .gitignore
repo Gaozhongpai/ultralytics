@@ -5,7 +5,7 @@ __pycache__/
 
 # C extensions
 *.so
-
+coco
 # Distribution / packaging
 .Python
 build/
@@ -148,4 +148,3 @@ wandb/
 *_saved_model/
 *_web_model/
 *_openvino_model/
-*_paddle_model/
