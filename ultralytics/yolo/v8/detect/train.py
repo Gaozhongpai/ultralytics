@@ -189,7 +189,7 @@ class Loss:
             mask_gt)
 
         target_bboxes /= stride_tensor
-        target_scores_sum = target_scores.sum()
+        target_scores_sum = max(target_scores.sum(), 1)
 
         # cls loss
         # loss[1] = self.varifocal_loss(pred_scores, target_scores, target_labels) / target_scores_sum  # VFL way
