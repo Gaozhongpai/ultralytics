@@ -65,7 +65,7 @@ class DetectionTrainer(BaseTrainer):
         return model
 
     def get_validator(self):
-        self.loss_names = 'box_loss', 'cls_loss', 'rot_loss', 'dfl_loss'
+        self.loss_names = 'box_loss', 'cls_loss', 'dfl_loss', 'rot_loss'
         return v8.detect.DetectionValidator(self.test_loader,
                                             save_dir=self.save_dir,
                                             logger=self.console,
@@ -178,7 +178,7 @@ class Loss:
         # pboxes
         pred_bboxes = self.bbox_decode(anchor_points, pred_distri)  # xyxy, (b, h*w, 4)
 
-        _, target_bboxes, target_scores, target_rotations, fg_mask, _ = self.assigner(
+        target_labels, target_bboxes, target_scores, target_rotations, fg_mask, _ = self.assigner(
             pred_scores.detach().sigmoid(), 
             (pred_rotations.detach().sigmoid() - 0.5) * 2,
             (pred_bboxes.detach() * stride_tensor).type(gt_bboxes.dtype),
@@ -194,8 +194,9 @@ class Loss:
         # cls loss
         # loss[1] = self.varifocal_loss(pred_scores, target_scores, target_labels) / target_scores_sum  # VFL way
         loss[1] = self.bce(pred_scores, target_scores.to(dtype)).sum() / target_scores_sum  # BCE
-        loss[3] = self.l1loss(pred_rotations, target_rotations.to(dtype)).sum() / target_scores_sum  # BCE
-
+        idx_hands = target_labels>0
+        loss[3] = self.l1loss(pred_rotations[idx_hands], target_rotations[idx_hands])  # L1 loss
+        
         # bbox loss
         if fg_mask.sum():
             loss[0], loss[2] = self.bbox_loss(pred_distri, pred_bboxes, anchor_points, target_bboxes, target_scores,

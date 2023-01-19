@@ -122,7 +122,7 @@ class Boxes:
     def __init__(self, boxes, orig_shape) -> None:
         if boxes.ndim == 1:
             boxes = boxes[None, :]
-        assert boxes.shape[-1] == 6  # xyxy, conf, cls
+        assert boxes.shape[-1] == 6 + 1  # xyxy, conf, cls, rot
         self.boxes = boxes
         self.orig_shape = torch.as_tensor(orig_shape, device=boxes.device) if isinstance(boxes, torch.Tensor) \
             else np.asarray(orig_shape)
@@ -133,10 +133,14 @@ class Boxes:
 
     @property
     def conf(self):
-        return self.boxes[:, -2]
+        return self.boxes[:, -3]
 
     @property
     def cls(self):
+        return self.boxes[:, -2]
+    
+    @property
+    def rot(self):
         return self.boxes[:, -1]
 
     @property

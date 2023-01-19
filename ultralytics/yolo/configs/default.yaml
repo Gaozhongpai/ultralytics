@@ -9,12 +9,12 @@ model: null # i.e. yolov8n.pt, yolov8n.yaml. Path to model file
 data: null # i.e. coco128.yaml. Path to data file
 epochs: 100 # number of epochs to train for
 patience: 50  # TODO: epochs to wait for no observable improvement for early stopping of training
-batch: 64 # number of images per batch
+batch: 96 # number of images per batch
 imgsz: 640 # size of input images
 save: True # save checkpoints
 cache: False # True/ram, disk or False. Use cache for data loading
 device: null # cuda device, i.e. 0 or 0,1,2,3 or cpu. Device to run on
-workers: 8 # number of worker threads for data loading
+workers: 24 # number of worker threads for data loading
 project: null # project name
 name: null # experiment name
 exist_ok: False # whether to overwrite existing experiment
@@ -28,7 +28,7 @@ image_weights: False # use weighted image selection for training
 rect: False # support rectangular training
 cos_lr: False # use cosine learning rate scheduler
 close_mosaic: 10 # disable mosaic augmentation for final 10 epochs
-resume: False # resume training from last checkpoint
+resume: false # resume training from last checkpoint
 # Segmentation
 overlap_mask: True # masks should overlap during training
 mask_ratio: 4 # mask downsample ratio
@@ -39,7 +39,7 @@ dropout: 0.0  # use dropout regularization
 val: True # validate/test during training
 save_json: False # save results to JSON file
 save_hybrid: False # save hybrid version of labels (labels + additional predictions)
-conf: null # object confidence threshold for detection (default 0.25 predict, 0.001 val)
+conf: 0.35 # object confidence threshold for detection (default 0.25 predict, 0.001 val)
 iou: 0.7 # intersection over union (IoU) threshold for NMS
 max_det: 300 # maximum number of detections per image
 half: False # use half precision (FP16)
@@ -82,7 +82,7 @@ warmup_momentum: 0.8  # warmup initial momentum
 warmup_bias_lr: 0.1  # warmup initial bias lr
 box: 7.5  # box loss gain
 cls: 0.5  # cls loss gain (scale with pixels)
-rot: 0.2  # cls loss gain (scale with pixels)
+rot: 1.0  # cls loss gain (scale with pixels)
 dfl: 1.5  # dfl loss gain
 fl_gamma: 0.0  # focal loss gamma (efficientDet default gamma=1.5)
 label_smoothing: 0.0
