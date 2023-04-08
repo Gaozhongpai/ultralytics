@@ -14,7 +14,9 @@ from ..utils.checks import check_version
 from ..utils.instance import Instances
 from ..utils.metrics import bbox_ioa
 from ..utils.ops import segment2box
-from .utils import IMAGENET_MEAN, IMAGENET_STD, polygons2masks, polygons2masks_overlap
+from .utils import polygons2masks, polygons2masks_overlap
+
+POSE_FLIPLR_INDEX = [0, 2, 1, 4, 3, 6, 5, 8, 7, 10, 9, 12, 11, 14, 13, 16, 15]
 
 
 # TODO: we might need a BaseTransform to make all these augments be compatible with both classification and semantic
@@ -55,11 +57,11 @@ class Compose:
         return self.transforms
 
     def __repr__(self):
-        format_string = f"{self.__class__.__name__}("
+        format_string = f'{self.__class__.__name__}('
         for t in self.transforms:
-            format_string += "\n"
-            format_string += f"    {t}"
-        format_string += "\n)"
+            format_string += '\n'
+            format_string += f'    {t}'
+        format_string += '\n)'
         return format_string
 
 
@@ -86,11 +88,11 @@ class BaseMixTransform:
         if self.pre_transform is not None:
             for i, data in enumerate(mix_labels):
                 mix_labels[i] = self.pre_transform(data)
-        labels["mix_labels"] = mix_labels
+        labels['mix_labels'] = mix_labels
 
         # Mosaic or MixUp
         labels = self._mix_transform(labels)
-        labels.pop("mix_labels", None)
+        labels.pop('mix_labels', None)
         return labels
 
     def _mix_transform(self, labels):
@@ -109,7 +111,7 @@ class Mosaic(BaseMixTransform):
     """
 
     def __init__(self, dataset, imgsz=640, p=1.0, border=(0, 0)):
-        assert 0 <= p <= 1.0, "The probability should be in range [0, 1]. " f"got {p}."
+        assert 0 <= p <= 1.0, 'The probability should be in range [0, 1]. ' f'got {p}.'
         super().__init__(dataset=dataset, p=p)
         self.dataset = dataset
         self.imgsz = imgsz
@@ -120,15 +122,15 @@ class Mosaic(BaseMixTransform):
 
     def _mix_transform(self, labels):
         mosaic_labels = []
-        assert labels.get("rect_shape", None) is None, "rect and mosaic is exclusive."
-        assert len(labels.get("mix_labels", [])) > 0, "There are no other images for mosaic augment."
+        assert labels.get('rect_shape', None) is None, 'rect and mosaic is exclusive.'
+        assert len(labels.get('mix_labels', [])) > 0, 'There are no other images for mosaic augment.'
         s = self.imgsz
         yc, xc = (int(random.uniform(-x, 2 * s + x)) for x in self.border)  # mosaic center x, y
         for i in range(4):
-            labels_patch = (labels if i == 0 else labels["mix_labels"][i - 1]).copy()
+            labels_patch = (labels if i == 0 else labels['mix_labels'][i - 1]).copy()
             # Load image
-            img = labels_patch["img"]
-            h, w = labels_patch["resized_shape"]
+            img = labels_patch['img']
+            h, w = labels_patch.pop('resized_shape')
 
             # place img in img4
             if i == 0:  # top left
@@ -152,15 +154,15 @@ class Mosaic(BaseMixTransform):
             labels_patch = self._update_labels(labels_patch, padw, padh)
             mosaic_labels.append(labels_patch)
         final_labels = self._cat_labels(mosaic_labels)
-        final_labels["img"] = img4
+        final_labels['img'] = img4
         return final_labels
 
     def _update_labels(self, labels, padw, padh):
         """Update labels"""
-        nh, nw = labels["img"].shape[:2]
-        labels["instances"].convert_bbox(format="xyxy")
-        labels["instances"].denormalize(nw, nh)
-        labels["instances"].add_padding(padw, padh)
+        nh, nw = labels['img'].shape[:2]
+        labels['instances'].convert_bbox(format='xyxy')
+        labels['instances'].denormalize(nw, nh)
+        labels['instances'].add_padding(padw, padh)
         return labels
 
     def _cat_labels(self, mosaic_labels):
@@ -169,15 +171,16 @@ class Mosaic(BaseMixTransform):
         cls = []
         instances = []
         for labels in mosaic_labels:
-            cls.append(labels["cls"])
-            instances.append(labels["instances"])
+            cls.append(labels['cls'])
+            instances.append(labels['instances'])
         final_labels = {
-            "ori_shape": mosaic_labels[0]["ori_shape"],
-            "resized_shape": (self.imgsz * 2, self.imgsz * 2),
-            "im_file": mosaic_labels[0]["im_file"],
-            "cls": np.concatenate(cls, 0),
-            "instances": Instances.concatenate(instances, axis=0)}
-        final_labels["instances"].clip(self.imgsz * 2, self.imgsz * 2)
+            'im_file': mosaic_labels[0]['im_file'],
+            'ori_shape': mosaic_labels[0]['ori_shape'],
+            'resized_shape': (self.imgsz * 2, self.imgsz * 2),
+            'cls': np.concatenate(cls, 0),
+            'instances': Instances.concatenate(instances, axis=0),
+            'mosaic_border': self.border}
+        final_labels['instances'].clip(self.imgsz * 2, self.imgsz * 2)
         return final_labels
 
 
@@ -192,16 +195,23 @@ class MixUp(BaseMixTransform):
     def _mix_transform(self, labels):
         # Applies MixUp augmentation https://arxiv.org/pdf/1710.09412.pdf
         r = np.random.beta(32.0, 32.0)  # mixup ratio, alpha=beta=32.0
-        labels2 = labels["mix_labels"][0]
-        labels["img"] = (labels["img"] * r + labels2["img"] * (1 - r)).astype(np.uint8)
-        labels["instances"] = Instances.concatenate([labels["instances"], labels2["instances"]], axis=0)
-        labels["cls"] = np.concatenate([labels["cls"], labels2["cls"]], 0)
+        labels2 = labels['mix_labels'][0]
+        labels['img'] = (labels['img'] * r + labels2['img'] * (1 - r)).astype(np.uint8)
+        labels['instances'] = Instances.concatenate([labels['instances'], labels2['instances']], axis=0)
+        labels['cls'] = np.concatenate([labels['cls'], labels2['cls']], 0)
         return labels
 
 
 class RandomPerspective:
 
-    def __init__(self, degrees=0.0, translate=0.1, scale=0.5, shear=0.0, perspective=0.0, border=(0, 0)):
+    def __init__(self,
+                 degrees=0.0,
+                 translate=0.1,
+                 scale=0.5,
+                 shear=0.0,
+                 perspective=0.0,
+                 border=(0, 0),
+                 pre_transform=None):
         self.degrees = degrees
         self.translate = translate
         self.scale = scale
@@ -209,8 +219,9 @@ class RandomPerspective:
         self.perspective = perspective
         # mosaic border
         self.border = border
+        self.pre_transform = pre_transform
 
-    def affine_transform(self, img):
+    def affine_transform(self, img, border):
         # Center
         C = np.eye(3)
 
@@ -243,7 +254,7 @@ class RandomPerspective:
         # Combined rotation matrix
         M = T @ S @ R @ P @ C  # order of operations (right to left) is IMPORTANT
         # affine image
-        if (self.border[0] != 0) or (self.border[1] != 0) or (M != np.eye(3)).any():  # image changed
+        if (border[0] != 0) or (border[1] != 0) or (M != np.eye(3)).any():  # image changed
             if self.perspective:
                 img = cv2.warpPerspective(img, M, dsize=self.size, borderValue=(114, 114, 114))
             else:  # affine
@@ -300,27 +311,22 @@ class RandomPerspective:
         """apply affine to keypoints.
 
         Args:
-            keypoints(ndarray): keypoints, [N, 17, 2].
+            keypoints(ndarray): keypoints, [N, 17, 3].
             M(ndarray): affine matrix.
         Return:
-            new_keypoints(ndarray): keypoints after affine, [N, 17, 2].
+            new_keypoints(ndarray): keypoints after affine, [N, 17, 3].
         """
-        n = len(keypoints)
+        n, nkpt = keypoints.shape[:2]
         if n == 0:
             return keypoints
-        new_keypoints = np.ones((n * 17, 3))
-        new_keypoints[:, :2] = keypoints.reshape(n * 17, 2)  # num_kpt is hardcoded to 17
-        new_keypoints = new_keypoints @ M.T  # transform
-        new_keypoints = (new_keypoints[:, :2] / new_keypoints[:, 2:3]).reshape(n, 34)  # perspective rescale or affine
-        new_keypoints[keypoints.reshape(-1, 34) == 0] = 0
-        x_kpts = new_keypoints[:, list(range(0, 34, 2))]
-        y_kpts = new_keypoints[:, list(range(1, 34, 2))]
-
-        x_kpts[np.logical_or.reduce((x_kpts < 0, x_kpts > self.size[0], y_kpts < 0, y_kpts > self.size[1]))] = 0
-        y_kpts[np.logical_or.reduce((x_kpts < 0, x_kpts > self.size[0], y_kpts < 0, y_kpts > self.size[1]))] = 0
-        new_keypoints[:, list(range(0, 34, 2))] = x_kpts
-        new_keypoints[:, list(range(1, 34, 2))] = y_kpts
-        return new_keypoints.reshape(n, 17, 2)
+        xy = np.ones((n * nkpt, 3))
+        visible = keypoints[..., 2].reshape(n * nkpt, 1)
+        xy[:, :2] = keypoints[..., :2].reshape(n * nkpt, 2)
+        xy = xy @ M.T  # transform
+        xy = xy[:, :2] / xy[:, 2:3]  # perspective rescale or affine
+        out_mask = (xy[:, 0] < 0) | (xy[:, 1] < 0) | (xy[:, 0] > self.size[0]) | (xy[:, 1] > self.size[1])
+        visible[out_mask] = 0
+        return np.concatenate([xy, visible], axis=-1).reshape(n, nkpt, 3)
 
     def __call__(self, labels):
         """
@@ -329,17 +335,22 @@ class RandomPerspective:
         Args:
             labels(Dict): a dict of `bboxes`, `segments`, `keypoints`.
         """
-        img = labels["img"]
-        cls = labels["cls"]
-        instances = labels.pop("instances")
+        if self.pre_transform and 'mosaic_border' not in labels:
+            labels = self.pre_transform(labels)
+            labels.pop('ratio_pad')  # do not need ratio pad
+
+        img = labels['img']
+        cls = labels['cls']
+        instances = labels.pop('instances')
         # make sure the coord formats are right
-        instances.convert_bbox(format="xyxy")
+        instances.convert_bbox(format='xyxy')
         instances.denormalize(*img.shape[:2][::-1])
 
-        self.size = img.shape[1] + self.border[1] * 2, img.shape[0] + self.border[0] * 2  # w, h
+        border = labels.pop('mosaic_border', self.border)
+        self.size = img.shape[1] + border[1] * 2, img.shape[0] + border[0] * 2  # w, h
         # M is affine matrix
         # scale for func:`box_candidates`
-        img, M, scale = self.affine_transform(img)
+        img, M, scale = self.affine_transform(img, border)
 
         bboxes = self.apply_bboxes(instances.bboxes, M)
 
@@ -351,7 +362,7 @@ class RandomPerspective:
 
         if keypoints is not None:
             keypoints = self.apply_keypoints(keypoints, M)
-        new_instances = Instances(bboxes, segments, keypoints, bbox_format="xyxy", normalized=False)
+        new_instances = Instances(bboxes, segments, keypoints, bbox_format='xyxy', normalized=False)
         # clip
         new_instances.clip(*self.size)
 
@@ -361,10 +372,10 @@ class RandomPerspective:
         i = self.box_candidates(box1=instances.bboxes.T,
                                 box2=new_instances.bboxes.T,
                                 area_thr=0.01 if len(segments) else 0.10)
-        labels["instances"] = new_instances[i]
-        labels["cls"] = cls[i]
-        labels["img"] = img
-        labels["resized_shape"] = img.shape[:2]
+        labels['instances'] = new_instances[i]
+        labels['cls'] = cls[i]
+        labels['img'] = img
+        labels['resized_shape'] = img.shape[:2]
         return labels
 
     def box_candidates(self, box1, box2, wh_thr=2, ar_thr=100, area_thr=0.1, eps=1e-16):  # box1(4,n), box2(4,n)
@@ -383,7 +394,7 @@ class RandomHSV:
         self.vgain = vgain
 
     def __call__(self, labels):
-        img = labels["img"]
+        img = labels['img']
         if self.hgain or self.sgain or self.vgain:
             r = np.random.uniform(-1, 1, 3) * [self.hgain, self.sgain, self.vgain] + 1  # random gains
             hue, sat, val = cv2.split(cv2.cvtColor(img, cv2.COLOR_BGR2HSV))
@@ -401,30 +412,34 @@ class RandomHSV:
 
 class RandomFlip:
 
-    def __init__(self, p=0.5, direction="horizontal") -> None:
-        assert direction in ["horizontal", "vertical"], f"Support direction `horizontal` or `vertical`, got {direction}"
+    def __init__(self, p=0.5, direction='horizontal', flip_idx=None) -> None:
+        assert direction in ['horizontal', 'vertical'], f'Support direction `horizontal` or `vertical`, got {direction}'
         assert 0 <= p <= 1.0
 
         self.p = p
         self.direction = direction
+        self.flip_idx = flip_idx
 
     def __call__(self, labels):
-        img = labels["img"]
-        instances = labels.pop("instances")
-        instances.convert_bbox(format="xywh")
+        img = labels['img']
+        instances = labels.pop('instances')
+        instances.convert_bbox(format='xywh')
         h, w = img.shape[:2]
         h = 1 if instances.normalized else h
         w = 1 if instances.normalized else w
 
         # Flip up-down
-        if self.direction == "vertical" and random.random() < self.p:
+        if self.direction == 'vertical' and random.random() < self.p:
             img = np.flipud(img)
             instances.flipud(h)
-        if self.direction == "horizontal" and random.random() < self.p:
+        if self.direction == 'horizontal' and random.random() < self.p:
             img = np.fliplr(img)
             instances.fliplr(w)
-        labels["img"] = np.ascontiguousarray(img)
-        labels["instances"] = instances
+            # for keypoints
+            if self.flip_idx is not None and instances.keypoints is not None:
+                instances.keypoints = np.ascontiguousarray(instances.keypoints[:, self.flip_idx, :])
+        labels['img'] = np.ascontiguousarray(img)
+        labels['instances'] = instances
         return labels
 
 
@@ -441,9 +456,9 @@ class LetterBox:
     def __call__(self, labels=None, image=None):
         if labels is None:
             labels = {}
-        img = labels.get("img") if image is None else image
+        img = labels.get('img') if image is None else image
         shape = img.shape[:2]  # current shape [height, width]
-        new_shape = labels.pop("rect_shape", self.new_shape)
+        new_shape = labels.pop('rect_shape', self.new_shape)
         if isinstance(new_shape, int):
             new_shape = (new_shape, new_shape)
 
@@ -465,8 +480,8 @@ class LetterBox:
 
         dw /= 2  # divide padding into 2 sides
         dh /= 2
-        if labels.get("ratio_pad"):
-            labels["ratio_pad"] = (labels["ratio_pad"], (dw, dh))  # for evaluation
+        if labels.get('ratio_pad'):
+            labels['ratio_pad'] = (labels['ratio_pad'], (dw, dh))  # for evaluation
 
         if shape[::-1] != new_unpad:  # resize
             img = cv2.resize(img, new_unpad, interpolation=cv2.INTER_LINEAR)
@@ -477,18 +492,18 @@ class LetterBox:
 
         if len(labels):
             labels = self._update_labels(labels, ratio, dw, dh)
-            labels["img"] = img
-            labels["resized_shape"] = new_shape
+            labels['img'] = img
+            labels['resized_shape'] = new_shape
             return labels
         else:
             return img
 
     def _update_labels(self, labels, ratio, padw, padh):
         """Update labels"""
-        labels["instances"].convert_bbox(format="xyxy")
-        labels["instances"].denormalize(*labels["img"].shape[:2][::-1])
-        labels["instances"].scale(*ratio)
-        labels["instances"].add_padding(padw, padh)
+        labels['instances'].convert_bbox(format='xyxy')
+        labels['instances'].denormalize(*labels['img'].shape[:2][::-1])
+        labels['instances'].scale(*ratio)
+        labels['instances'].add_padding(padw, padh)
         return labels
 
 
@@ -499,10 +514,12 @@ class CopyPaste:
 
     def __call__(self, labels):
         # Implement Copy-Paste augmentation https://arxiv.org/abs/2012.07177, labels as nx5 np.array(cls, xyxy)
-        im = labels["img"]
-        cls = labels["cls"]
-        instances = labels.pop("instances")
-        instances.convert_bbox(format="xyxy")
+        im = labels['img']
+        cls = labels['cls']
+        h, w = im.shape[:2]
+        instances = labels.pop('instances')
+        instances.convert_bbox(format='xyxy')
+        instances.denormalize(w, h)
         if self.p and len(instances.segments):
             n = len(instances)
             _, w, _ = im.shape  # height, width, channels
@@ -524,9 +541,9 @@ class CopyPaste:
             i = cv2.flip(im_new, 1).astype(bool)
             im[i] = result[i]  # cv2.imwrite('debug.jpg', im)  # debug
 
-        labels["img"] = im
-        labels["cls"] = cls
-        labels["instances"] = instances
+        labels['img'] = im
+        labels['cls'] = cls
+        labels['instances'] = instances
         return labels
 
 
@@ -535,11 +552,11 @@ class Albumentations:
     def __init__(self, p=1.0):
         self.p = p
         self.transform = None
-        prefix = colorstr("albumentations: ")
+        prefix = colorstr('albumentations: ')
         try:
             import albumentations as A
 
-            check_version(A.__version__, "1.0.3", hard=True)  # version requirement
+            check_version(A.__version__, '1.0.3', hard=True)  # version requirement
 
             T = [
                 A.Blur(p=0.01),
@@ -548,28 +565,30 @@ class Albumentations:
                 A.CLAHE(p=0.01),
                 A.RandomBrightnessContrast(p=0.0),
                 A.RandomGamma(p=0.0),
-                A.ImageCompression(quality_lower=75, p=0.0),]  # transforms
-            self.transform = A.Compose(T, bbox_params=A.BboxParams(format="yolo", label_fields=["class_labels"]))
+                A.ImageCompression(quality_lower=75, p=0.0)]  # transforms
+            self.transform = A.Compose(T, bbox_params=A.BboxParams(format='yolo', label_fields=['class_labels']))
 
-            LOGGER.info(prefix + ", ".join(f"{x}".replace("always_apply=False, ", "") for x in T if x.p))
+            LOGGER.info(prefix + ', '.join(f'{x}'.replace('always_apply=False, ', '') for x in T if x.p))
         except ImportError:  # package not installed, skip
             pass
         except Exception as e:
-            LOGGER.info(f"{prefix}{e}")
+            LOGGER.info(f'{prefix}{e}')
 
     def __call__(self, labels):
-        im = labels["img"]
-        cls = labels["cls"]
+        im = labels['img']
+        cls = labels['cls']
         if len(cls):
-            labels["instances"].convert_bbox("xywh")
-            labels["instances"].normalize(*im.shape[:2][::-1])
-            bboxes = labels["instances"].bboxes
+            labels['instances'].convert_bbox('xywh')
+            labels['instances'].normalize(*im.shape[:2][::-1])
+            bboxes = labels['instances'].bboxes
             # TODO: add supports of segments and keypoints
             if self.transform and random.random() < self.p:
                 new = self.transform(image=im, bboxes=bboxes, class_labels=cls)  # transformed
-                labels["img"] = new["image"]
-                labels["cls"] = np.array(new["class_labels"])
-            labels["instances"].update(bboxes=bboxes)
+                if len(new['class_labels']) > 0:  # skip update if no bbox in new im
+                    labels['img'] = new['image']
+                    labels['cls'] = np.array(new['class_labels'])
+                    bboxes = np.array(new['bboxes'])
+            labels['instances'].update(bboxes=bboxes)
         return labels
 
 
@@ -577,7 +596,7 @@ class Albumentations:
 class Format:
 
     def __init__(self,
-                 bbox_format="xywh",
+                 bbox_format='xywh',
                  normalize=True,
                  return_mask=False,
                  return_keypoint=False,
@@ -593,10 +612,10 @@ class Format:
         self.batch_idx = batch_idx  # keep the batch indexes
 
     def __call__(self, labels):
-        img = labels["img"]
+        img = labels.pop('img')
         h, w = img.shape[:2]
-        cls = labels.pop("cls")
-        instances = labels.pop("instances")
+        cls = labels.pop('cls')
+        instances = labels.pop('instances')
         instances.convert_bbox(format=self.bbox_format)
         instances.denormalize(w, h)
         nl = len(instances)
@@ -608,17 +627,17 @@ class Format:
             else:
                 masks = torch.zeros(1 if self.mask_overlap else nl, img.shape[0] // self.mask_ratio,
                                     img.shape[1] // self.mask_ratio)
-            labels["masks"] = masks
+            labels['masks'] = masks
         if self.normalize:
             instances.normalize(w, h)
-        labels["img"] = self._format_img(img)
-        labels["cls"] = torch.from_numpy(cls) if nl else torch.zeros(nl)
-        labels["bboxes"] = torch.from_numpy(instances.bboxes) if nl else torch.zeros((nl, 4))
+        labels['img'] = self._format_img(img)
+        labels['cls'] = torch.from_numpy(cls) if nl else torch.zeros(nl)
+        labels['bboxes'] = torch.from_numpy(instances.bboxes) if nl else torch.zeros((nl, 4))
         if self.return_keypoint:
-            labels["keypoints"] = torch.from_numpy(instances.keypoints) if nl else torch.zeros((nl, 17, 2))
+            labels['keypoints'] = torch.from_numpy(instances.keypoints)
         # then we can use collate_fn
         if self.batch_idx:
-            labels["batch_idx"] = torch.zeros(nl)
+            labels['batch_idx'] = torch.zeros(nl)
         return labels
 
     def _format_img(self, img):
@@ -642,7 +661,7 @@ class Format:
         return masks, instances, cls
 
 
-def mosaic_transforms(dataset, imgsz, hyp):
+def v8_transforms(dataset, imgsz, hyp):
     pre_transform = Compose([
         Mosaic(dataset, imgsz=imgsz, p=hyp.mosaic, border=[-imgsz // 2, -imgsz // 2]),
         CopyPaste(p=hyp.copy_paste),
@@ -652,40 +671,30 @@ def mosaic_transforms(dataset, imgsz, hyp):
             scale=hyp.scale,
             shear=hyp.shear,
             perspective=hyp.perspective,
-            border=[-imgsz // 2, -imgsz // 2],
-        ),])
+            pre_transform=LetterBox(new_shape=(imgsz, imgsz)),
+        )])
+    flip_idx = dataset.data.get('flip_idx', None)  # for keypoints augmentation
+    if dataset.use_keypoints and flip_idx is None and hyp.fliplr > 0.0:
+        hyp.fliplr = 0.0
+        LOGGER.warning("WARNING ⚠️ No `flip_idx` provided while training keypoints, setting augmentation 'fliplr=0.0'")
     return Compose([
         pre_transform,
         MixUp(dataset, pre_transform=pre_transform, p=hyp.mixup),
         Albumentations(p=1.0),
         RandomHSV(hgain=hyp.hsv_h, sgain=hyp.hsv_s, vgain=hyp.hsv_v),
-        RandomFlip(direction="vertical", p=hyp.flipud),
-        RandomFlip(direction="horizontal", p=hyp.fliplr),])  # transforms
-
-
-def affine_transforms(imgsz, hyp):
-    return Compose([
-        LetterBox(new_shape=(imgsz, imgsz)),
-        RandomPerspective(
-            degrees=hyp.degrees,
-            translate=hyp.translate,
-            scale=hyp.scale,
-            shear=hyp.shear,
-            perspective=hyp.perspective,
-            border=[0, 0],
-        ),
-        Albumentations(p=1.0),
-        RandomHSV(hgain=hyp.hsv_h, sgain=hyp.hsv_s, vgain=hyp.hsv_v),
-        RandomFlip(direction="vertical", p=hyp.flipud),
-        RandomFlip(direction="horizontal", p=hyp.fliplr),])  # transforms
+        RandomFlip(direction='vertical', p=hyp.flipud),
+        RandomFlip(direction='horizontal', p=hyp.fliplr, flip_idx=flip_idx)])  # transforms
 
 
 # Classification augmentations -----------------------------------------------------------------------------------------
-def classify_transforms(size=224):
+def classify_transforms(size=224, mean=(0.0, 0.0, 0.0), std=(1.0, 1.0, 1.0)):  # IMAGENET_MEAN, IMAGENET_STD
     # Transforms to apply if albumentations not installed
-    assert isinstance(size, int), f"ERROR: classify_transforms size {size} must be integer, not (list, tuple)"
-    # T.Compose([T.ToTensor(), T.Resize(size), T.CenterCrop(size), T.Normalize(IMAGENET_MEAN, IMAGENET_STD)])
-    return T.Compose([CenterCrop(size), ToTensor(), T.Normalize(IMAGENET_MEAN, IMAGENET_STD)])
+    if not isinstance(size, int):
+        raise TypeError(f'classify_transforms() size {size} must be integer, not (list, tuple)')
+    if any(mean) or any(std):
+        return T.Compose([CenterCrop(size), ToTensor(), T.Normalize(mean, std, inplace=True)])
+    else:
+        return T.Compose([CenterCrop(size), ToTensor()])
 
 
 def classify_albumentations(
@@ -695,40 +704,40 @@ def classify_albumentations(
         hflip=0.5,
         vflip=0.0,
         jitter=0.4,
-        mean=IMAGENET_MEAN,
-        std=IMAGENET_STD,
+        mean=(0.0, 0.0, 0.0),  # IMAGENET_MEAN
+        std=(1.0, 1.0, 1.0),  # IMAGENET_STD
         auto_aug=False,
 ):
     # YOLOv8 classification Albumentations (optional, only used if package is installed)
-    prefix = colorstr("albumentations: ")
+    prefix = colorstr('albumentations: ')
     try:
         import albumentations as A
         from albumentations.pytorch import ToTensorV2
 
-        check_version(A.__version__, "1.0.3", hard=True)  # version requirement
+        check_version(A.__version__, '1.0.3', hard=True)  # version requirement
         if augment:  # Resize and crop
             T = [A.RandomResizedCrop(height=size, width=size, scale=scale)]
             if auto_aug:
                 # TODO: implement AugMix, AutoAug & RandAug in albumentation
-                LOGGER.info(f"{prefix}auto augmentations are currently not supported")
+                LOGGER.info(f'{prefix}auto augmentations are currently not supported')
             else:
                 if hflip > 0:
                     T += [A.HorizontalFlip(p=hflip)]
                 if vflip > 0:
                     T += [A.VerticalFlip(p=vflip)]
                 if jitter > 0:
-                    color_jitter = (float(jitter),) * 3  # repeat value for brightness, contrast, saturation, 0 hue
-                    T += [A.ColorJitter(*color_jitter, 0)]
+                    jitter = float(jitter)
+                    T += [A.ColorJitter(jitter, jitter, jitter, 0)]  # brightness, contrast, saturation, 0 hue
         else:  # Use fixed crop for eval set (reproducibility)
             T = [A.SmallestMaxSize(max_size=size), A.CenterCrop(height=size, width=size)]
         T += [A.Normalize(mean=mean, std=std), ToTensorV2()]  # Normalize and convert to Tensor
-        LOGGER.info(prefix + ", ".join(f"{x}".replace("always_apply=False, ", "") for x in T if x.p))
+        LOGGER.info(prefix + ', '.join(f'{x}'.replace('always_apply=False, ', '') for x in T if x.p))
         return A.Compose(T)
 
     except ImportError:  # package not installed, skip
         pass
     except Exception as e:
-        LOGGER.info(f"{prefix}{e}")
+        LOGGER.info(f'{prefix}{e}')
 
 
 class ClassifyLetterBox:
