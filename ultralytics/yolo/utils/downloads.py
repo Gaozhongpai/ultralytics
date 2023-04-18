@@ -57,6 +57,10 @@ def unzip_file(file, path=None, exclude=('.DS_Store', '__MACOSX')):
                 zipObj.extract(f, path=path)
         return unzip_dir  # return unzip dir
 
+def gsutil_getsize(url=''):
+    # gs://bucket/file size https://cloud.google.com/storage/docs/gsutil/commands/du
+    s = subprocess.check_output(f'gsutil du {url}', shell=True).decode('utf-8')
+    return eval(s.split(' ')[0]) if len(s) else 0  # bytes
 
 def check_disk_space(url='https://ultralytics.com/assets/coco128.zip', sf=1.5, hard=True):
     """

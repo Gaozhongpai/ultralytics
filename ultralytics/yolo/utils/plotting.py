@@ -191,6 +191,10 @@ class Annotator:
     def rectangle(self, xy, fill=None, outline=None, width=1):
         """Add rectangle to image (PIL-only)."""
         self.draw.rectangle(xy, fill, outline, width)
+    
+    def line(self, xy, fill=None, width=3):
+        # Add line to image (PIL-only)
+        self.draw.line(xy, fill, width)
 
     def text(self, xy, text, txt_color=(255, 255, 255), anchor='top'):
         """Adds text to an image using PIL or cv2."""
@@ -283,7 +287,7 @@ def save_one_box(xyxy, im, file=Path('im.jpg'), gain=1.02, pad=10, square=False,
 def plot_images(images,
                 batch_idx,
                 cls,
-                rot,
+                bh,
                 bboxes,
                 masks=np.zeros(0, dtype=np.uint8),
                 kpts=np.zeros((0, 51), dtype=np.float32),
@@ -295,8 +299,8 @@ def plot_images(images,
         images = images.cpu().float().numpy()
     if isinstance(cls, torch.Tensor):
         cls = cls.cpu().numpy()
-    if isinstance(rot, torch.Tensor):
-        rot = rot.cpu().numpy()
+    if isinstance(bh, torch.Tensor):
+        bh = bh.cpu().numpy()
     if isinstance(bboxes, torch.Tensor):
         bboxes = bboxes.cpu().numpy()
     if isinstance(masks, torch.Tensor):
@@ -341,28 +345,38 @@ def plot_images(images,
         if len(cls) > 0:
             idx = batch_idx == i
 
+            labels = bboxes.shape[1] == 4  # labels if no conf column
+            
             boxes = xywh2xyxy(bboxes[idx, :4]).T
             classes = cls[idx].astype('int')
-            rotations = rot[idx].astype('float') * 180
-            labels = bboxes.shape[1] == 4  # labels if no conf column
+            lines = np.concatenate([cls[idx][:, None], bboxes[idx, :2], bh[idx]], axis=1)
+            lines[:, 3:5] = lines[:, 3:5] if labels else lines[:, 3:5] + lines[:, 1:3] 
+            
             conf = None if labels else bboxes[idx, 4]  # check for confidence presence (label vs pred)
 
             if boxes.shape[1]:
                 if boxes.max() <= 1.01:  # if normalized with tolerance 0.01
                     boxes[[0, 2]] *= w  # scale to pixels
                     boxes[[1, 3]] *= h
+                    lines[:, [1, 3]] *= w
+                    lines[:, [2, 4]] *= h
                 elif scale < 1:  # absolute coords need scale if image scales
                     boxes *= scale
+                    lines[:, 1:5] *= scale
             boxes[[0, 2]] += x
             boxes[[1, 3]] += y
+            lines[:, [1, 3]] += x
+            lines[:, [2, 4]] += y
             for j, box in enumerate(boxes.T.tolist()):
                 c = classes[j]
-                r = rotations[j]
-                color = colors(c)
+                color = colors((c+1)*5 % 20)
                 c = names.get(c, c) if names else c
                 if labels or conf[j] > 0.25:  # 0.25 conf thresh
                     # label = f'{c}' if labels else f'{c} {conf[j]:.1f}'
-                    label = '%s %.1f' % (c, r) if labels else '%s %.1f %.1f' % (c, r, conf[j])
+                    if lines[j, 0] != 0:
+                        annotator.line((int(lines[j, 1]), int(lines[j, 2]), int(lines[j, 3]), int(lines[j, 4])),
+                                       (255, 0, 0))
+                    label = '%s' % (c) if labels else '%s %.1f' % (c, conf[j])
                     annotator.box_label(box, label, color=color)
 
             # Plot keypoints
@@ -448,8 +462,8 @@ def output_to_target(output, max_det=300):
     """Convert model output to target format [batch_id, class_id, x, y, w, h, conf] for plotting."""
     targets = []
     for i, o in enumerate(output):
-        box, conf, cls, rot = o[:max_det, :7].cpu().split((4, 1, 1, 1), 1)
+        box, conf, cls, bh1, bh2 = o[:max_det].cpu().split((4, 1, 1, 1, 1), 1)
         j = torch.full((conf.shape[0], 1), i)
-        targets.append(torch.cat((j, cls, rot, xyxy2xywh(box), conf), 1))
+        targets.append(torch.cat((j, cls, bh1, bh2, xyxy2xywh(box), conf), 1))
     targets = torch.cat(targets, 0).numpy()
-    return targets[:, 0], targets[:, 1],  targets[:, 2], targets[:, 3:7]
+    return targets[:, 0], targets[:, 1],  targets[:, 2:4], targets[:, 4:]

@@ -7,7 +7,7 @@ import numpy as np
 import torch
 
 from ultralytics.yolo.data import build_dataloader
-from ultralytics.yolo.data.dataloaders.v5loader import create_dataloader
+from ultralytics.yolo.data.dataloaders.piloader import create_dataloader
 from ultralytics.yolo.engine.validator import BaseValidator
 from ultralytics.yolo.utils import DEFAULT_CFG, LOGGER, colorstr, ops
 from ultralytics.yolo.utils.checks import check_requirements
@@ -29,13 +29,14 @@ class DetectionValidator(BaseValidator):
         self.niou = self.iouv.numel()
 
     def preprocess(self, batch):
-        batch["img"] = batch["img"].to(self.device, non_blocking=True)
-        batch["img"] = (batch["img"].half() if self.args.half else batch["img"].float()) / 255
-        for k in ["batch_idx", "cls", 'rot', "bboxes"]:
+        """Preprocesses batch of images for YOLO training."""
+        batch['img'] = batch['img'].to(self.device, non_blocking=True)
+        batch['img'] = (batch['img'].half() if self.args.half else batch['img'].float()) / 255
+        for k in ['batch_idx', 'cls', 'bh', 'bboxes']:
             batch[k] = batch[k].to(self.device)
 
         nb = len(batch['img'])
-        self.lb = [torch.cat([batch['cls'], batch['bboxes']], dim=-1)[batch['batch_idx'] == i]
+        self.lb = [torch.cat([batch['cls'], batch['bboxes'], batch['bh']], dim=-1)[batch['batch_idx'] == i]
                    for i in range(nb)] if self.args.save_hybrid else []  # for autolabelling
 
         return batch
@@ -75,7 +76,7 @@ class DetectionValidator(BaseValidator):
         for si, pred in enumerate(preds):
             idx = batch["batch_idx"] == si
             cls = batch["cls"][idx]
-            rot = batch["rot"][idx]
+            bh = batch["bh"][idx]
             bbox = batch["bboxes"][idx]
             nl, npr = cls.shape[0], pred.shape[0]  # number of labels, predictions
             shape = batch['ori_shape'][si]
@@ -194,7 +195,7 @@ class DetectionValidator(BaseValidator):
         plot_images(batch["img"],
                     batch["batch_idx"],
                     batch["cls"].squeeze(-1),
-                    batch["rot"].squeeze(-1),
+                    batch["bh"],
                     batch["bboxes"],
                     paths=batch["im_file"],
                     fname=self.save_dir / f"val_batch{ni}_labels.jpg",
@@ -228,8 +229,7 @@ class DetectionValidator(BaseValidator):
                 'image_id': image_id,
                 'category_id': self.class_map[int(p[5])],
                 'bbox': [round(x, 3) for x in b],
-                'score': round(p[4], 5),
-                'score': round(p[6], 2)})
+                'score': round(p[4], 5)})
 
     def eval_json(self, stats):
         """Evaluates YOLO output in JSON format and returns performance statistics."""

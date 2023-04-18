@@ -16,6 +16,11 @@ from ultralytics.yolo.utils import LOGGER, SimpleClass, TryExcept, plt_settings
 OKS_SIGMA = np.array([.26, .25, .25, .35, .35, .79, .79, .72, .72, .62, .62, 1.07, 1.07, .87, .87, .89, .89]) / 10.0
 
 
+def fitness(x):
+    # Model fitness as a weighted combination of metrics
+    w = [0.0, 0.0, 0.1, 0.9]  # weights for [P, R, mAP@0.5, mAP@0.5:0.95]
+    return (x[:, :4] * w).sum(1)
+
 # Boxes
 def box_area(box):
     """Return box area, where box shape is xyxy(4,n)."""
@@ -73,7 +78,7 @@ def box_iou(box1, box2, eps=1e-7):
     return inter / ((a2 - a1).prod(2) + (b2 - b1).prod(2) - inter + eps)
 
 
-def bbox_iou(box1, box2, xywh=True, GIoU=False, DIoU=False, CIoU=False, eps=1e-7):
+def bbox_iou(box1, box2, xywh=True, GIoU=False, DIoU=False, CIoU=False, is_AnyPoint=False, eps=1e-7):
     """
     Calculate Intersection over Union (IoU) of box1(1, 4) to box2(n, 4).
 
@@ -100,6 +105,11 @@ def bbox_iou(box1, box2, xywh=True, GIoU=False, DIoU=False, CIoU=False, eps=1e-7
     else:  # x1, y1, x2, y2 = box1
         b1_x1, b1_y1, b1_x2, b1_y2 = box1.chunk(4, -1)
         b2_x1, b2_y1, b2_x2, b2_y2 = box2.chunk(4, -1)
+        if is_AnyPoint:
+            b1_x1, b1_y1 = box1[:, [0, 2]].min(dim=1)[0][:, None], box1[:, [1, 3]].min(dim=1)[0][:, None]
+            b1_x2, b1_y2 = box1[:, [0, 2]].max(dim=1)[0][:, None], box1[:, [1, 3]].max(dim=1)[0][:, None]
+            b2_x1, b2_y1 = box2[:, [0, 2]].min(dim=1)[0][:, None], box2[:, [1, 3]].min(dim=1)[0][:, None]
+            b2_x2, b2_y2 = box2[:, [0, 2]].max(dim=1)[0][:, None], box2[:, [1, 3]].max(dim=1)[0][:, None]
         w1, h1 = b1_x2 - b1_x1, b1_y2 - b1_y1 + eps
         w2, h2 = b2_x2 - b2_x1, b2_y2 - b2_y1 + eps
 

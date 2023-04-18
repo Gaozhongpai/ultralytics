@@ -79,7 +79,7 @@ class TaskAlignedAssigner(nn.Module):
         self.eps = eps
 
     @torch.no_grad()
-    def forward(self, pd_scores, pd_rotations, pd_bboxes, anc_points, gt_labels, gt_rotations, gt_bboxes, mask_gt):
+    def forward(self, pd_scores, pd_bhs, pd_bboxes, anc_points, gt_labels, gt_bhs, gt_bboxes, mask_gt):
         """This code referenced to
            https://github.com/Nioolek/PPYOLOE_pytorch/blob/master/ppyoloe/assigner/tal_assigner.py
 
@@ -106,8 +106,7 @@ class TaskAlignedAssigner(nn.Module):
             return (torch.full_like(pd_scores[..., 0], self.bg_idx).to(device),  
                     torch.zeros_like(pd_bboxes).to(device),
                     torch.zeros_like(pd_scores).to(device), 
-                    torch.zeros_like(pd_rotations).to(device), 
-                    torch.zeros_like(pd_scores[..., 0]).to(device),
+                    torch.zeros_like(pd_bhs).to(device), 
                     torch.zeros_like(pd_scores[..., 0]).to(device))
 
         mask_pos, align_metric, overlaps = self.get_pos_mask(pd_scores, pd_bboxes, gt_labels, gt_bboxes, anc_points,
@@ -116,7 +115,8 @@ class TaskAlignedAssigner(nn.Module):
         target_gt_idx, fg_mask, mask_pos = select_highest_overlaps(mask_pos, overlaps, self.n_max_boxes)
 
         # assigned target
-        target_labels, target_bboxes, target_scores, target_rotatotions = self.get_targets(gt_labels, gt_rotations, gt_bboxes, target_gt_idx, fg_mask)
+        target_labels, target_bboxes, target_scores, target_bhs = \
+            self.get_targets(gt_labels, gt_bboxes, gt_bhs, target_gt_idx, fg_mask)
 
         # Normalize
         align_metric *= mask_pos
@@ -125,7 +125,7 @@ class TaskAlignedAssigner(nn.Module):
         norm_align_metric = (align_metric * pos_overlaps / (pos_align_metrics + self.eps)).amax(-2).unsqueeze(-1)
         target_scores = target_scores * norm_align_metric
 
-        return target_labels, target_bboxes, target_scores, target_rotatotions, fg_mask.bool(), target_gt_idx
+        return target_labels, target_bboxes, target_scores, target_bhs, fg_mask.bool(), target_gt_idx
 
     def get_pos_mask(self, pd_scores, pd_bboxes, gt_labels, gt_bboxes, anc_points, mask_gt):
         """Get in_gts mask, (b, max_num_obj, h*w)."""
@@ -193,7 +193,7 @@ class TaskAlignedAssigner(nn.Module):
         is_in_topk = torch.where(is_in_topk > 1, 0, is_in_topk)
         return is_in_topk.to(metrics.dtype)
 
-    def get_targets(self, gt_labels, gt_rotations, gt_bboxes, target_gt_idx, fg_mask):
+    def get_targets(self, gt_labels, gt_bboxes, gt_bhs, target_gt_idx, fg_mask):
         """
         Compute target labels, target bounding boxes, and target scores for the positive anchor points.
 
@@ -225,7 +225,7 @@ class TaskAlignedAssigner(nn.Module):
 
         # Assigned target boxes, (b, max_num_obj, 4) -> (b, h*w)
         target_bboxes = gt_bboxes.view(-1, 4)[target_gt_idx]
-        target_rotations = gt_rotations.view(-1, 1)[target_gt_idx]
+        target_bhs = gt_bhs.view(-1, 2)[target_gt_idx]
 
         # Assigned target scores
         target_labels.clamp(0)
@@ -233,7 +233,7 @@ class TaskAlignedAssigner(nn.Module):
         fg_scores_mask = fg_mask[:, :, None].repeat(1, 1, self.num_classes)  # (b, h*w, 80)
         target_scores = torch.where(fg_scores_mask > 0, target_scores, 0)
 
-        return target_labels, target_bboxes, target_scores, target_rotations
+        return target_labels, target_bboxes, target_scores, target_bhs
 
 
 def make_anchors(feats, strides, grid_cell_offset=0.5):

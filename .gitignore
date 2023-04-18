@@ -7,6 +7,7 @@ __pycache__/
 *.so
 coco
 dataset
+.vscode
 # Distribution / packaging
 .Python
 build/
