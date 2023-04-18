@@ -633,7 +633,7 @@ def process_mask_native(protos, masks_in, bboxes, shape):
     return masks.gt_(0.5)
 
 
-def scale_coords(img1_shape, coords, img0_shape, ratio_pad=None, normalize=False):
+def scale_coords(img1_shape, coords, img0_shape, ratio_pad=None, normalize=False, is_clip=True):
     """
     Rescale segment coordinates (xyxy) from img1_shape to img0_shape
 
@@ -658,7 +658,8 @@ def scale_coords(img1_shape, coords, img0_shape, ratio_pad=None, normalize=False
     coords[..., 1] -= pad[1]  # y padding
     coords[..., 0] /= gain
     coords[..., 1] /= gain
-    clip_coords(coords, img0_shape)
+    if is_clip:
+        clip_coords(coords, img0_shape)
     if normalize:
         coords[..., 0] /= img0_shape[1]  # width
         coords[..., 1] /= img0_shape[0]  # height
