@@ -124,7 +124,7 @@ def create_dataloader(path, imgsz, batch_size, stride, hyp=None, augment=False, 
                         num_workers=nw,
                         sampler=sampler,
                         pin_memory=True,
-                        collate_fn=LoadImagesAndLabels.collate_fn4 if quad else LoadImagesAndLabels.collate_fn)
+                        collate_fn=LoadImagesAndLabels.collate_fn_old if quad else LoadImagesAndLabels.collate_fn)
     return dataloader, dataset
 
 
@@ -470,6 +470,10 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         [cache.pop(k) for k in ('hash', 'version', 'msgs')]  # remove items
         labels, shapes, self.segments = zip(*cache.values())
         self.labels = list(labels)
+        for i, lbs in enumerate(self.labels):
+            self.labels[i] = np.asarray([np.concatenate([label[:5], (label[1:3]*100 if label[0] == 0 \
+                else label[5:7]*100)]) for label in lbs[:, :7]])
+            
         self.shapes = np.array(shapes, dtype=np.float64)
         self.img_files = list(cache.keys())  # update
         self.label_files = img2label_paths(cache.keys(), labels_dir=self.labels_dir)  # update
@@ -478,7 +482,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 x[:, 0] = 0
 
         n = len(shapes)  # number of images
-        bi = np.floor(np.arange(n) / batch_size).astype(np.int)  # batch index
+        bi = np.floor(np.arange(n) / batch_size).astype(np.int32)  # batch index
         nb = bi[-1] + 1  # number of batches
         self.batch = bi  # batch index of image
         self.n = n
@@ -506,7 +510,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 elif mini > 1:
                     shapes[i] = [1, 1 / mini]
 
-            self.batch_shapes = np.ceil(np.array(shapes) * img_size / stride + pad).astype(np.int) * stride
+            self.batch_shapes = np.ceil(np.array(shapes) * img_size / stride + pad).astype(np.int32) * stride
 
         # Cache images into memory for faster training (WARNING: large datasets may exceed system RAM)
         self.imgs, self.img_npy = [None] * n, [None] * n
@@ -835,8 +839,6 @@ def load_mosaic(self, index):
 
         # Labels
         labels, segments = self.labels[index].copy(), self.segments[index].copy()
-        labels = np.asarray([np.concatenate([label[:5], (label[1:3]*100 if label[0] == 0 \
-                else label[5:7]*100)]) for label in labels[:, :7]])
         if labels.size:
             labels[:, 1:5] = xywhn2xyxy(labels[:, 1:5], w, h, padw, padh)  # normalized xywh to pixel xyxy format
             segments = [xyn2xy(x, w, h, padw, padh) for x in segments]
@@ -899,8 +901,6 @@ def load_mosaic9(self, index):
 
         # Labels
         labels, segments = self.labels[index].copy(), self.segments[index].copy()
-        labels = np.asarray([np.concatenate([label[:5], (label[1:3]*100 if label[0] == 0 \
-            else label[5:7]*100)]) for label in labels[:, :7]])
         if labels.size:
             labels[:, 1:5] = xywhn2xyxy(labels[:, 1:5], w, h, padx, pady)  # normalized xywh to pixel xyxy format
             segments = [xyn2xy(x, w, h, padx, pady) for x in segments]

@@ -10,11 +10,13 @@ sys.path.append(FILE.parents[0].as_posix())  # add kapao/ to path
 import numpy as np
 import torch
 from tqdm import tqdm
-from models.common import DetectMultiBackend
-from utils.datasetsv2 import create_dataloader, letterbox
-from utils.general import LOGGER, check_dataset_v2, check_file, check_img_size, \
+from ultralytics import YOLO
+
+from ultralytics.nn.autobackend import AutoBackend
+from ultralytics.yolo.data.dataloaders.piloader import create_dataloader, letterbox
+from ultralytics.yolo.data.dataloaders.pigeneral import LOGGER, check_dataset_v2, check_file, check_img_size, \
     non_max_suppression, scale_boxes, set_logging, colorstr, xyxy2xywh
-from utils.torch_utils import select_device, time_sync
+from ultralytics.yolo.utils.torch_utils import select_device, time_sync
 import tempfile
 import cv2
 import pickle
@@ -22,7 +24,7 @@ import pickle
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 
-from utils.bp_eval import body_part_association_evaluation
+from ultralytics.yolo.utils.bp_eval import body_part_association_evaluation
 
 class Colors:
     # Ultralytics color palette https://ultralytics.com/
@@ -125,7 +127,8 @@ def post_process_batch(data, imgs, paths, shapes, body_dets, part_dets):
                     if x0+y0+x1+y1!=0:
                         cv2.rectangle(img, (int(x0), int(y0)), (int(x1), int(y1)), c, thickness=4)
                         cv2.line(img, (int(x0), int(y0)), (int(bx0), int(by0)), c, thickness=4)
-            cv2.imwrite("./debug/"+Path(paths[si]).stem+".jpg", img)
+            Path("./runs/debug/").mkdir(parents=True, exist_ok=True)
+            cv2.imwrite("./runs/debug/"+Path(paths[si]).stem+".jpg", img)
                         
             batch_bboxes.extend(b_bboxes)
             batch_points.extend(part_pts)
@@ -167,13 +170,15 @@ def run(opt, data,
     if training:  # called by train.py
         device = next(model.parameters()).device  # get model device
     else:  # called directly
-        device = select_device(device, batch_size=batch_size)
+        device = select_device(device, batch=batch_size)
 
         dnn=False
         half=True
         # Load model
-        model = DetectMultiBackend(weights, device=device, dnn=dnn, data=None, fp16=half)
-        stride, names, pt = model.stride, model.names, model.pt
+        
+        model = YOLO('yolov8m.yaml').load(weights)
+        model = AutoBackend(model.model, device=device, dnn=False, data=None, fp16=half)
+        stride, pt, jit, engine = model.stride, model.pt, model.jit, model.engine            
         imgsz = check_img_size(imgsz, s=stride)  # check image size
         half = model.fp16  # FP16 supported on limited backends with CUDA
         # Data
@@ -206,8 +211,8 @@ def run(opt, data,
         if device.type != 'cpu':
             model(torch.zeros(1, 3, imgsz, imgsz).to(device).type_as(next(model.parameters())))  # run once
         task = task if task in ('train', 'val', 'test') else 'val'  # path to train/val/test images
-        dataloader = create_dataloader(data[task], data['labels'], imgsz, batch_size, gs, opt, 
-            pad=pad, rect=rect, prefix=colorstr(f'{task}: '))[0]
+        dataloader = create_dataloader(data[task], imgsz, batch_size, gs, 
+                                       pad=pad, rect=rect, quad=True, prefix=colorstr(f'{task}: '))[0]
 
     color = Colors()
     seen = 0

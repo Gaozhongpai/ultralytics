@@ -85,7 +85,7 @@ def segment2box(segment, width=640, height=640):
         4, dtype=segment.dtype)  # xyxy
 
 
-def scale_boxes(img1_shape, boxes, img0_shape, ratio_pad=None):
+def scale_boxes(img1_shape, boxes, img0_shape, ratio_pad=None, is_clip=True):
     """
     Rescales bounding boxes (in the format of xyxy) from the shape of the image they were originally specified in
     (img1_shape) to the shape of a different image (img0_shape).
@@ -110,7 +110,8 @@ def scale_boxes(img1_shape, boxes, img0_shape, ratio_pad=None):
     boxes[..., [0, 2]] -= pad[0]  # x padding
     boxes[..., [1, 3]] -= pad[1]  # y padding
     boxes[..., :4] /= gain
-    clip_boxes(boxes, img0_shape)
+    if is_clip:
+        clip_boxes(boxes, img0_shape)
     return boxes
 
 

@@ -10,7 +10,10 @@
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
-            "justMyCode": true
+            "justMyCode": true,
+            "args": ["--rect", "--data", "ultralytics/yolo/data/datasets/JointBP_BodyHands.yaml", "--img", "640", // val-bp bodyhand
+                     "--weights", "runs/detect/BodyHand/weights/best.pt",
+                     "--batch-size", "8", "--device", "0"]
         }
     ]
 }

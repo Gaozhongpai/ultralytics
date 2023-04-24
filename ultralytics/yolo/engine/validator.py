@@ -30,7 +30,7 @@ from ultralytics.yolo.data.utils import check_cls_dataset, check_det_dataset
 from ultralytics.yolo.utils import DEFAULT_CFG, LOGGER, RANK, SETTINGS, TQDM_BAR_FORMAT, callbacks, colorstr, emojis
 from ultralytics.yolo.utils.checks import check_imgsz
 from ultralytics.yolo.utils.files import increment_path
-from ultralytics.yolo.utils.ops import Profile
+from ultralytics.yolo.utils.ops import Profile, scale_boxes
 from ultralytics.yolo.utils.torch_utils import de_parallel, select_device, smart_inference_mode
 
 
@@ -161,11 +161,17 @@ class BaseValidator:
             with dt[2]:
                 if self.training:
                     self.loss += trainer.criterion(preds, batch)[1]
-
+            
             # Postprocess
             with dt[3]:
                 preds = self.postprocess(preds)
-
+            
+            for si in range(len(preds)):
+                preds[si][:, -2:] *= torch.tensor(batch['img'][si].shape[1:], device=self.device)  # to pixels
+                # preds[si][:, -2:] = scale_boxes(batch['img'][si].shape[1:], 
+                #                                 preds[si][:, [-2, -1, -2, -1]], 
+                #                                 batch['ori_shape'][si], 
+                #                                 batch['ratio_pad'][si], False)[:, -2:]  # native-space pred
             self.update_metrics(preds, batch)
             if self.args.plots and batch_i < 3:
                 self.plot_val_samples(batch, batch_i)
