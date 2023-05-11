@@ -224,7 +224,8 @@ class Loss:
                                                        target_bhs,
                                                        target_scores,
                                                        target_scores_sum, 
-                                                       fg_mask)
+                                                       fg_mask, 
+                                                       idx_hands)
 
         loss[0] *= self.hyp.box  # box gain
         loss[1] *= self.hyp.cls  # cls gain

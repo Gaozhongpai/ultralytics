@@ -33,7 +33,7 @@ class BboxLoss(nn.Module):
         self.use_dfl = use_dfl
 
     def forward(self, pred_dist, pred_bboxes, pred_bh, anchor_points, 
-                target_bboxes, target_bhs, target_scores, target_scores_sum, fg_mask):
+                target_bboxes, target_bhs, target_scores, target_scores_sum, fg_mask, idx_hands):
         """IoU loss."""
         weight = torch.masked_select(target_scores.sum(-1), fg_mask).unsqueeze(-1)
         iou = bbox_iou(pred_bboxes[fg_mask], target_bboxes[fg_mask], xywh=False, CIoU=True)
@@ -41,8 +41,11 @@ class BboxLoss(nn.Module):
 
         pred_bh_pos = torch.cat([pred_bh, pred_bboxes[..., -2:]], -1)
         target_bhs_pos = torch.cat([target_bhs, target_bboxes[..., -2:]], -1)
-        iou_bh = bbox_iou(pred_bh_pos[fg_mask], target_bhs_pos[fg_mask], xywh=False, CIoU=True, is_AnyPoint=True)
-        loss_iou_bh = ((1.0 - iou_bh)*weight).sum() / target_scores_sum
+        iou_bh = bbox_iou(pred_bh_pos[fg_mask*idx_hands], target_bhs_pos[fg_mask*idx_hands], xywh=False, CIoU=True, is_AnyPoint=True)
+        
+        loss_iou_bh = (1.0 - iou_bh).mean()
+        if (fg_mask*idx_hands).sum() == 0:
+            loss_iou_bh = 0.0
         # DFL loss
         if self.use_dfl:
             target_ltrb = bbox2dist(anchor_points, target_bboxes, self.reg_max)

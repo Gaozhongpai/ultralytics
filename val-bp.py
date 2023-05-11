@@ -76,20 +76,30 @@ def post_process_batch(data, imgs, paths, shapes, body_dets, part_dets):
                 img_id = int(osp.splitext(osp.split(path)[-1])[0].split("_")[-1]) if path else si
                 
             ## part 
-            bboxes = scale_boxes(imgs[si].shape[1:], pdet[:, :4], shape).cpu().numpy()
+            bboxes = scale_boxes(imgs[si].shape[1:], pdet[:, :4], shape, shapes[si][1]).cpu().numpy()
             px1, py1, px2, py2 = bboxes[:, 0], bboxes[:, 1], bboxes[:, 2], bboxes[:, 3]
             conf, cls = pdet[:, 4].cpu().numpy(), pdet[:, 5].cpu().numpy()
             p_xc, p_yc = np.mean((px1, px2), axis=0), np.mean((py1, py2), axis=0)
 
             # rot, length = pdet[:, -2], pdet[:, -1]
             dx, dy = pdet[:, -2], pdet[:, -1]
-            dd_temp = torch.stack([dx, dy, dx, dy], dim=-1)
-            dd_temp_np = scale_boxes(imgs[si].shape[1:], dd_temp, shape).cpu().numpy()
+            height, width = imgs[si].shape[1:]
+            dd_temp = torch.stack([dx, dy, dx, dy], dim=-1) * torch.tensor((width, height, width, height)).to(pdet)
+            dd_temp_np = scale_boxes(imgs[si].shape[1:], dd_temp, shape, shapes[si][1], False).cpu().numpy()
             points = np.stack([p_xc + dd_temp_np[:, 0], p_yc + dd_temp_np[:, 1]], axis=-1)
+            
+            # img = cv2.imread(paths[si])
+            # for k, b_bbox in enumerate(bboxes):
+            #     c = color(int(k*color.n/len(bboxes)))
+            #     bx0, by0, bx1, by1 = b_bbox
+            #     cv2.rectangle(img, (int(bx0), int(by0)), (int(bx1), int(by1)), c, thickness=4)
+            #     px, py = points[k, 0], points[k, 1]
+            #     cv2.line(img, (int(bx0), int(by0)), (int(px), int(py)), c, thickness=4)
+            # cv2.imwrite("test.jpg", img)
             
             ## body 
             scores = bdet[:, 4].cpu().numpy()  # body detection score
-            b_bboxes = scale_boxes(imgs[si].shape[1:], bdet[:, :4].clone(), shape).cpu().numpy()
+            b_bboxes = scale_boxes(imgs[si].shape[1:], bdet[:, :4].clone(), shape, shapes[si][1]).cpu().numpy()
             bx1, by1, bx2, by2 = b_bboxes[:, 0], b_bboxes[:, 1], b_bboxes[:, 2], b_bboxes[:, 3]
             b_xc, b_yc = np.mean((bx1, bx2), axis=0), np.mean((by1, by2), axis=0)
             b_points = np.stack([b_xc, b_yc], axis=-1)
@@ -127,6 +137,12 @@ def post_process_batch(data, imgs, paths, shapes, body_dets, part_dets):
                     if x0+y0+x1+y1!=0:
                         cv2.rectangle(img, (int(x0), int(y0)), (int(x1), int(y1)), c, thickness=4)
                         cv2.line(img, (int(x0), int(y0)), (int(bx0), int(by0)), c, thickness=4)
+            
+            for k, b_bbox in enumerate(bboxes):
+                c = color(int(k*color.n/len(b_bboxes)))
+                bx0, by0, bx1, by1 = b_bbox
+                px, py = points[k, 0], points[k, 1]
+                cv2.line(img, (int(bx0), int(by0)), (int(px), int(py)), c, thickness=4)
             Path("./runs/debug/").mkdir(parents=True, exist_ok=True)
             cv2.imwrite("./runs/debug/"+Path(paths[si]).stem+".jpg", img)
                         
