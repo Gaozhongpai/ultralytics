@@ -4,6 +4,7 @@ from copy import copy
 import numpy as np
 import torch
 import torch.nn as nn
+import cv2
 
 from ultralytics.nn.tasks import DetectionModel
 from ultralytics.yolo import v8
@@ -14,8 +15,26 @@ from ultralytics.yolo.utils import DEFAULT_CFG, RANK, colorstr
 from ultralytics.yolo.utils.loss import BboxLoss
 from ultralytics.yolo.utils.ops import xywh2xyxy
 from ultralytics.yolo.utils.plotting import plot_images, plot_labels, plot_results
-from ultralytics.yolo.utils.tal import TaskAlignedAssigner, dist2bbox, make_anchors
+from ultralytics.yolo.utils.tal import TaskAlignedAssigner, TaskAlignedAssignerBH, dist2bbox, make_anchors
 from ultralytics.yolo.utils.torch_utils import de_parallel
+
+
+class Colors:
+    # Ultralytics color palette https://ultralytics.com/
+    def __init__(self):
+        # hex = matplotlib.colors.TABLEAU_COLORS.values()
+        hex = ('FF3838', 'FF9D97', 'FF701F', 'FFB21D', 'CFD231', '48F90A', '92CC17', '3DDB86', '1A9334', '00D4BB',
+               '2C99A8', '00C2FF', '344593', '6473FF', '0018EC', '8438FF', '520085', 'CB38FF', 'FF95C8', 'FF37C7')
+        self.palette = [self.hex2rgb('#' + c) for c in hex]
+        self.n = len(self.palette)
+
+    def __call__(self, i, bgr=False):
+        c = self.palette[int(i) % self.n]
+        return (c[2], c[1], c[0]) if bgr else c
+
+    @staticmethod
+    def hex2rgb(h):  # rgb order (PIL)
+        return tuple(int(h[1 + i:1 + i + 2], 16) for i in (0, 2, 4))
 
 
 # BaseTrainer python usage
@@ -123,6 +142,7 @@ class Loss:
 
         m = model.model[-1]  # Detect() module
         self.bce = nn.BCEWithLogitsLoss(reduction='none')
+        self.l1 = nn.L1Loss()
         self.hyp = h
         self.stride = m.stride  # model strides
         self.nc = m.nc  # number of classes
@@ -133,6 +153,7 @@ class Loss:
         self.use_dfl = m.reg_max > 1
 
         self.assigner = TaskAlignedAssigner(topk=10, num_classes=self.nc, alpha=0.5, beta=6.0)
+        self.assigner_bh = TaskAlignedAssignerBH(topk=10, num_classes=self.nc, alpha=0.5, beta=6.0, is_bh=True)
         self.bbox_loss = BboxLoss(m.reg_max - 1, use_dfl=self.use_dfl).to(device)
         self.proj = torch.arange(m.reg_max, dtype=torch.float, device=device)
 
@@ -195,7 +216,15 @@ class Loss:
         pred_bboxes = self.bbox_decode(anchor_points, pred_distri)  # xyxy, (b, h*w, 4)
         pred_bh = self.bh_decode(anchor_points, pred_bh * (imgsz / stride_tensor)[None])  # xyxy, (b, h*w, 4)
 
-        target_labels, target_bboxes, target_scores, target_bhs, fg_mask, _ = self.assigner(
+        target_labels, target_bboxes, target_scores, fg_mask, _ = self.assigner(
+            pred_scores.detach().sigmoid(), 
+            (pred_bboxes.detach() * stride_tensor).type(gt_bboxes.dtype),
+            anchor_points * stride_tensor, 
+            gt_labels, 
+            gt_bboxes, 
+            mask_gt)
+        
+        target_bhs_2, fg_mask_2, target_gt_idx_2 = self.assigner_bh(
             pred_scores.detach().sigmoid(), 
             pred_bh,
             (pred_bboxes.detach() * stride_tensor).type(gt_bboxes.dtype),
@@ -204,24 +233,39 @@ class Loss:
             gt_bhs,
             gt_bboxes, 
             mask_gt)
+        
+        idx_hands = target_labels>0
+        
+        # color = Colors()
+        # anchors_p = (anchor_points * stride_tensor)[(fg_mask_2)[0]].detach().cpu().numpy().astype(np.int32)
+        # target_p = target_bhs_2[0][(fg_mask_2)[0]].detach().cpu().numpy().astype(np.int32)
+        # target_gt_p = target_gt_idx_2[0][(fg_mask_2)[0]]
+        # image_ori = (batch['img'][0].permute(1, 2, 0).cpu().numpy()*255).astype(np.uint8)
+        # cv2.imwrite("test1.png", image_ori)
+        # image = image_ori.copy()
+        # # Draw points on the image
+        # for pt1, pt2, cls in zip(anchors_p, target_p, target_gt_p):
+        #     # image = cv2.circle(image, tuple(pt1), radius=5, color=(0, 255, 0), thickness=-1)
+        #     c = color((cls*3)%20)
+        #     image = cv2.circle(image, tuple(pt2), radius=5, color=c, thickness=-1)
+        #     image = cv2.line(image, tuple(pt1), tuple(pt2), color=c, thickness=1)
+        # cv2.imwrite("test2.png", image)
 
         target_bboxes /= stride_tensor
-        target_bhs /= stride_tensor
+        target_bhs_2 /= stride_tensor
         target_scores_sum = max(target_scores.sum(), 1)
-
+        
+        loss[3] = self.l1(target_bhs_2[fg_mask_2], pred_bh[fg_mask_2]) 
         # cls loss
         # loss[1] = self.varifocal_loss(pred_scores, target_scores, target_labels) / target_scores_sum  # VFL way
         loss[1] = self.bce(pred_scores, target_scores.to(dtype)).sum() / target_scores_sum  # BCE
-        idx_hands = target_labels>0
         
         # bbox loss
         if fg_mask.sum():
-            loss[0], loss[2], loss[3] = self.bbox_loss(pred_distri, 
+            loss[0], loss[2] = self.bbox_loss(pred_distri, 
                                                        pred_bboxes, 
-                                                       pred_bh,
                                                        anchor_points, 
                                                        target_bboxes, 
-                                                       target_bhs,
                                                        target_scores,
                                                        target_scores_sum, 
                                                        fg_mask)
@@ -229,7 +273,7 @@ class Loss:
         loss[0] *= self.hyp.box  # box gain
         loss[1] *= self.hyp.cls  # cls gain
         loss[2] *= self.hyp.dfl  # dfl gain
-        loss[3] *= self.hyp.bh  # rot gain
+        loss[3] *= self.hyp.bh / 25 # rot gain
 
         return loss.sum() * batch_size, loss.detach()  # loss(box, cls, dfl)
 

@@ -176,7 +176,7 @@ def run(opt, data,
         half=True
         # Load model
         
-        model = YOLO('yolov8m.yaml').load(weights)
+        model = YOLO('yolov8l.yaml').load(weights)
         model = AutoBackend(model.model, device=device, dnn=False, data=None, fp16=half)
         stride, pt, jit, engine = model.stride, model.pt, model.jit, model.engine            
         imgsz = check_img_size(imgsz, s=stride)  # check image size
