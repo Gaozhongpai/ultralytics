@@ -1,4 +1,4 @@
-# YOLOv5 🚀 by Ultralytics, GPL-3.0 license
+# YOLOv5 🚀 by UltralytiUltralytics package modificationss, GPL-3.0 license
 """
 Dataloaders and dataset utils
 """
@@ -92,11 +92,12 @@ def exif_transpose(image):
     return image
 
 
-def create_dataloader(path, imgsz, batch_size, stride, hyp=None, augment=False, cache=False, pad=0.0, rect=False, 
-                      rank=-1, world_size=1, workers=8, close_mosaic=False, image_weights=False, quad=False, prefix='', shuffle=False, seed=0):
+def create_dataloader(path, labels_dir, imgsz, batch_size, stride, hyp=None, augment=False, cache=False, pad=0.0, rect=False, 
+                      rank=-1, world_size=1, workers=8, close_mosaic=False, image_weights=False, quad=False, 
+                      prefix='', shuffle=False, seed=0):
     # Make sure only the first process in DDP process the dataset first, and the following others can use the cache
     with torch_distributed_zero_first(rank):
-        labels_dir = "yolov5_style_hand"
+        # labels_dir = "yolov5_style_face"
         dataset = LoadImagesAndLabels(path, labels_dir, imgsz, batch_size,
                                       augment=augment,  # augment images
                                       hyp=hyp,  # augmentation hyperparameters
@@ -1028,13 +1029,19 @@ def random_perspective(img, targets=(), segments=(), degrees=10, translate=.1, s
 
     return img, targets
 
+# def box_candidates(self, box1, box2, wh_thr=2, ar_thr=100, area_thr=0.1, eps=1e-16):  # box1(4,n), box2(4,n)
+#         # Compute box candidates: box1 before augment, box2 after augment, wh_thr (pixels), aspect_ratio_thr, area_ratio
+#         w1, h1 = box1[2] - box1[0], box1[3] - box1[1]
+#         w2, h2 = box2[2] - box2[0], box2[3] - box2[1]
+#         ar = np.maximum(w2 / (h2 + eps), h2 / (w2 + eps))  # aspect ratio
+#         return (w2 > wh_thr) & (h2 > wh_thr) & (w2 * h2 / (w1 * h1 + eps) > area_thr) & (ar < ar_thr)  # candidates
 
-def box_candidates(cls, box1, box2, wh_thr=10, ar_thr=10, area_thr=0.1, eps=1e-16):  # box1(4,n), box2(4,n)
+def box_candidates(cls, box1, box2, wh_thr=2, ar_thr=100, area_thr=0.1, eps=1e-16):  # box1(4,n), box2(4,n)
     # Compute candidate boxes: box1 before augment, box2 after augment, wh_thr (pixels), aspect_ratio_thr, area_ratio
     w1, h1 = box1[2] - box1[0], box1[3] - box1[1]
     w2, h2 = box2[2] - box2[0], box2[3] - box2[1]
     
-    wh_thr = np.ones_like(w1)*wh_thr ## hand
+    # wh_thr = np.ones_like(w1)*wh_thr ## hand
     # wh_thr[cls==0] = wh_thr[cls==0] * 4 ## body
     
     ar = np.maximum(w2 / (h2 + eps), h2 / (w2 + eps))  # aspect ratio
@@ -1125,7 +1132,7 @@ def verify_image_label(args):
         shape = exif_size(im)  # image size
         assert (shape[0] > 9) & (shape[1] > 9), f'image size {shape} <10 pixels'
         assert im.format.lower() in IMG_FORMATS, f'invalid image format {im.format}'
-        if im.format.lower() in ('jpg', 'jpeg'):
+        if im.format.lower() in ('jpg', 'jpeg', 'png'):
             with open(im_file, 'rb') as f:
                 f.seek(-2, 2)
                 if f.read() != b'\xff\xd9':  # corrupt JPEG

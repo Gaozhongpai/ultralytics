@@ -11,7 +11,7 @@ from ultralytics.yolo import v8
 from ultralytics.yolo.data import build_dataloader
 from ultralytics.yolo.data.dataloaders.piloader import create_dataloader
 from ultralytics.yolo.engine.trainer import BaseTrainer
-from ultralytics.yolo.utils import DEFAULT_CFG, RANK, colorstr
+from ultralytics.yolo.utils import DEFAULT_CFG, LOGGER, RANK, colorstr
 from ultralytics.yolo.utils.loss import BboxLoss
 from ultralytics.yolo.utils.ops import xywh2xyxy
 from ultralytics.yolo.utils.plotting import plot_images, plot_labels, plot_results
@@ -45,6 +45,7 @@ class DetectionTrainer(BaseTrainer):
         # Calculate stride - check if model is initialized
         gs = max(int(de_parallel(self.model).stride.max() if self.model else 0), 32)
         return create_dataloader(path=dataset_path,
+                                 labels_dir=self.data["labels"],
                                  imgsz=self.args.imgsz,
                                  batch_size=batch_size,
                                  stride=gs,
@@ -119,17 +120,18 @@ class DetectionTrainer(BaseTrainer):
                     bh=batch["bh"].squeeze(-1),
                     bboxes=batch['bboxes'],
                     paths=batch['im_file'],
-                    fname=self.save_dir / f'train_batch{ni}.jpg')
+                    fname=self.save_dir / f'train_batch{ni}.jpg',
+                    on_plot=self.on_plot)
 
     def plot_metrics(self):
         """Plots metrics from a CSV file."""
-        plot_results(file=self.csv)  # save results.png
+        plot_results(file=self.csv, on_plot=self.on_plot)  # save results.png
 
     def plot_training_labels(self):
         """Create a labeled training plot of the YOLO model."""
         boxes = np.concatenate([lb['bboxes'] for lb in self.train_loader.dataset.labels], 0)
         cls = np.concatenate([lb['cls'] for lb in self.train_loader.dataset.labels], 0)
-        plot_labels(boxes, cls.squeeze(), names=self.data['names'], save_dir=self.save_dir)
+        plot_labels(boxes, cls.squeeze(), names=self.data['names'], save_dir=self.save_dir, on_plot=self.on_plot)
 
 
 # Criterion class for computing training losses
