@@ -11,8 +11,8 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "justMyCode": true,
-            "args": ["--rect", "--data", "ultralytics/yolo/data/datasets/JointBP_BodyHands.yaml", "--img", "1280", // val-bp bodyhand
-                     "--weights", "runs/detect/BodyHand2/weights/best.pt",
+            "args": ["--rect", "--data", "ultralytics/yolo/data/datasets/JointBP_BodyHands.yaml", "--img", "1024", // val-bp bodyhand
+                     "--weights", "runs/detect/BodyHand5/weights/best.pt",
                      "--batch-size", "8", "--device", "0"]
         }
     ]

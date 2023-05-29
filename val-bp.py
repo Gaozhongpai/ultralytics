@@ -192,7 +192,7 @@ def run(opt, data,
         half=True
         # Load model
         
-        model = YOLO('yolov8m.yaml').load(weights)
+        model = YOLO('yolov8l.yaml').load(weights)
         model = AutoBackend(model.model, device=device, dnn=False, data=None, fp16=half)
         stride, pt, jit, engine = model.stride, model.pt, model.jit, model.engine            
         imgsz = check_img_size(imgsz, s=stride)  # check image size
@@ -208,7 +208,7 @@ def run(opt, data,
         data['iou_thres_part'] = 0.3  # the smaller iou threshold for filtering body-part detection proposals
     if data['dataset'] == "CrowdHuman" or data['dataset'] == "BodyHands":
         # data['dist_thre'] = 100
-        data['conf_thres'] = 0.05  # CrowdHuman and BodyHands have more dense instance labels
+        data['conf_thres'] = 0.15  # CrowdHuman and BodyHands have more dense instance labels
         data['iou_thres'] = 0.6
         data['conf_thres_part'] = 0.25  # CrowdHuman and BodyHands have more dense instance labels
         data['iou_thres_part'] = 0.6

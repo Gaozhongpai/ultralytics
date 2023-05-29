@@ -1,11 +1,10 @@
-# Traces
 ---
-:::ultralytics.hub.utils.Traces
-<br><br>
+description: Explore Ultralytics events, including 'request_with_credentials' and 'smart_request', to improve your project's performance and efficiency.
+---
 
-# check_dataset_disk_space
+# Events
 ---
-:::ultralytics.hub.utils.check_dataset_disk_space
+:::ultralytics.hub.utils.Events
 <br><br>
 
 # request_with_credentials
