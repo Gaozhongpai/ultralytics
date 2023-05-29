@@ -128,10 +128,11 @@ def check_latest_pypi_version(package_name='ultralytics'):
     Returns:
         (str): The latest version of the package.
     """
-    requests.packages.urllib3.disable_warnings()  # Disable the InsecureRequestWarning
-    response = requests.get(f'https://pypi.org/pypi/{package_name}/json', verify=False)
-    if response.status_code == 200:
-        return response.json()['info']['version']
+    with contextlib.suppress(Exception):
+        requests.packages.urllib3.disable_warnings()  # Disable the InsecureRequestWarning
+        response = requests.get(f'https://pypi.org/pypi/{package_name}/json', timeout=3)
+        if response.status_code == 200:
+            return response.json()['info']['version']
     return None
 
 
@@ -231,16 +232,22 @@ def check_requirements(requirements=ROOT.parent / 'requirements.txt', exclude=()
                 s += f'"{r}" '
                 n += 1
 
-    if s and install and AUTOINSTALL:  # check environment variable
-        LOGGER.info(f"{prefix} YOLOv8 requirement{'s' * (n > 1)} {s}not found, attempting AutoUpdate...")
-        try:
-            assert is_online(), 'AutoUpdate skipped (offline)'
-            LOGGER.info(subprocess.check_output(f'pip install --no-cache {s} {cmds}', shell=True).decode())
-            s = f"{prefix} {n} package{'s' * (n > 1)} updated per {file or requirements}\n" \
-                f"{prefix} ⚠️ {colorstr('bold', 'Restart runtime or rerun command for updates to take effect')}\n"
-            LOGGER.info(s)
-        except Exception as e:
-            LOGGER.warning(f'{prefix} ❌ {e}')
+    if s:
+        if install and AUTOINSTALL:  # check environment variable
+            LOGGER.info(f"{prefix} Ultralytics requirement{'s' * (n > 1)} {s}not found, attempting AutoUpdate...")
+            try:
+                assert is_online(), 'AutoUpdate skipped (offline)'
+                LOGGER.info(subprocess.check_output(f'pip install --no-cache {s} {cmds}', shell=True).decode())
+                s = f"{prefix} {n} package{'s' * (n > 1)} updated per {file or requirements}\n" \
+                    f"{prefix} ⚠️ {colorstr('bold', 'Restart runtime or rerun command for updates to take effect')}\n"
+                LOGGER.info(s)
+            except Exception as e:
+                LOGGER.warning(f'{prefix} ❌ {e}')
+                return False
+        else:
+            return False
+
+    return True
 
 
 def check_suffix(file='yolov8n.pt', suffix='.pt', msg=''):

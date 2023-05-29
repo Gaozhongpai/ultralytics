@@ -201,15 +201,16 @@ class YOLO:
         self.model.load(weights)
         return self
 
-    def info(self, verbose=True):
+    def info(self, detailed=False, verbose=True):
         """
         Logs model info.
 
         Args:
+            detailed (bool): Show detailed information about model.
             verbose (bool): Controls verbosity.
         """
         self._check_is_pytorch_model()
-        self.model.info(verbose=verbose)
+        return self.model.info(detailed=detailed, verbose=verbose)
 
     def fuse(self):
         """Fuse PyTorch Conv2d and BatchNorm2d layers."""
@@ -330,12 +331,12 @@ class YOLO:
         overrides = self.overrides.copy()
         overrides.update(kwargs)
         overrides['mode'] = 'export'
+        if overrides.get('imgsz') is None:
+            overrides['imgsz'] = self.model.args['imgsz']  # use trained imgsz unless custom value is passed
+        if overrides.get('batch') is None:
+            overrides['batch'] = 1  # default to 1 if not modified
         args = get_cfg(cfg=DEFAULT_CFG, overrides=overrides)
         args.task = self.task
-        if args.imgsz == DEFAULT_CFG.imgsz:
-            args.imgsz = self.model.args['imgsz']  # use trained imgsz unless custom value is passed
-        if args.batch == DEFAULT_CFG.batch:
-            args.batch = 1  # default to 1 if not modified
         return Exporter(overrides=args, _callbacks=self.callbacks)(model=self.model)
 
     def train(self, **kwargs):
@@ -352,10 +353,10 @@ class YOLO:
             kwargs = self.session.train_args
         check_pip_update_available()
         overrides = self.overrides.copy()
-        overrides.update(kwargs)
         if kwargs.get('cfg'):
             LOGGER.info(f"cfg file passed. Overriding default params with {kwargs['cfg']}.")
             overrides = yaml_load(check_yaml(kwargs['cfg']))
+        overrides.update(kwargs)
         overrides['mode'] = 'train'
         if not overrides.get('data'):
             raise AttributeError("Dataset required but missing, i.e. pass 'data=coco128.yaml'")
@@ -453,7 +454,7 @@ class YOLO:
                                        reduction_factor=3)
 
         # Define the callbacks for the hyperparameter search
-        tuner_callbacks = [WandbLoggerCallback(project='yolov8_tune') if wandb else None]
+        tuner_callbacks = [WandbLoggerCallback(project='yolov8_tune')] if wandb else []
 
         # Create the Ray Tune hyperparameter search tuner
         tuner = tune.Tuner(trainable_with_resources,
@@ -469,30 +470,26 @@ class YOLO:
 
     @property
     def names(self):
-        """
-        Returns class names of the loaded model.
-        """
+        """Returns class names of the loaded model."""
         return self.model.names if hasattr(self.model, 'names') else None
 
     @property
     def device(self):
-        """
-        Returns device if PyTorch model
-        """
+        """Returns device if PyTorch model."""
         return next(self.model.parameters()).device if isinstance(self.model, nn.Module) else None
 
     @property
     def transforms(self):
-        """
-        Returns transform of the loaded model.
-        """
+        """Returns transform of the loaded model."""
         return self.model.transforms if hasattr(self.model, 'transforms') else None
 
     def add_callback(self, event: str, func):
-        """
-        Add callback
-        """
+        """Add a callback."""
         self.callbacks[event].append(func)
+
+    def clear_callback(self, event: str):
+        """Clear all event callbacks."""
+        self.callbacks[event] = []
 
     @staticmethod
     def _reset_ckpt_args(args):

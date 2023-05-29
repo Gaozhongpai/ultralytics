@@ -35,7 +35,7 @@ class BboxLoss(nn.Module):
     def forward(self, pred_dist, pred_bboxes, pred_bh, anchor_points, 
                 target_bboxes, target_bhs, target_scores, target_scores_sum, fg_mask, idx_hands):
         """IoU loss."""
-        weight = torch.masked_select(target_scores.sum(-1), fg_mask).unsqueeze(-1)
+        weight = target_scores.sum(-1)[fg_mask].unsqueeze(-1)
         iou = bbox_iou(pred_bboxes[fg_mask], target_bboxes[fg_mask], xywh=False, CIoU=True)
         loss_iou = ((1.0 - iou) * weight).sum() / target_scores_sum
 

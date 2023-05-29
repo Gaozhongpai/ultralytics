@@ -9,7 +9,7 @@ import os
 import subprocess
 import time
 from copy import deepcopy
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -85,6 +85,7 @@ class BaseTrainer:
         self.validator = None
         self.model = None
         self.metrics = None
+        self.plots = {}
         init_seeds(self.args.seed + 1 + RANK, deterministic=self.args.deterministic)
 
         # Dirs
@@ -195,7 +196,11 @@ class BaseTrainer:
         torch.cuda.set_device(RANK)
         self.device = torch.device('cuda', RANK)
         LOGGER.info(f'DDP settings: RANK {RANK}, WORLD_SIZE {world_size}, DEVICE {self.device}')
-        dist.init_process_group('nccl' if dist.is_nccl_available() else 'gloo', rank=RANK, world_size=world_size)
+        os.environ['NCCL_BLOCKING_WAIT'] = '1'  # set to enforce timeout
+        dist.init_process_group('nccl' if dist.is_nccl_available() else 'gloo',
+                                timeout=timedelta(seconds=3600),
+                                rank=RANK,
+                                world_size=world_size)
 
     def _setup_train(self, world_size):
         """
@@ -281,6 +286,7 @@ class BaseTrainer:
         if self.args.close_mosaic:
             base_idx = (self.epochs - self.args.close_mosaic) * nb
             self.plot_idx.extend([base_idx, base_idx + 1, base_idx + 2])
+        epoch = self.epochs  # predefine for resume fully trained model edge cases
         for epoch in range(self.start_epoch, self.epochs):
             self.epoch = epoch
             self.run_callbacks('on_train_epoch_start')
@@ -295,6 +301,7 @@ class BaseTrainer:
                     self.train_loader.dataset.mosaic = False
                 if hasattr(self.train_loader.dataset, 'close_mosaic'):
                     self.train_loader.dataset.close_mosaic(hyp=self.args)
+                self.train_loader.reset()
 
             if RANK in (-1, 0):
                 LOGGER.info(self.progress_string())
@@ -407,12 +414,18 @@ class BaseTrainer:
             'date': datetime.now().isoformat(),
             'version': __version__}
 
+        # Use dill (if exists) to serialize the lambda functions where pickle does not do this
+        try:
+            import dill as pickle
+        except ImportError:
+            import pickle
+
         # Save last, best and delete
-        torch.save(ckpt, self.last)
+        torch.save(ckpt, self.last, pickle_module=pickle)
         if self.best_fitness == self.fitness:
-            torch.save(ckpt, self.best)
+            torch.save(ckpt, self.best, pickle_module=pickle)
         if (self.epoch > 0) and (self.save_period > 0) and (self.epoch % self.save_period == 0):
-            torch.save(ckpt, self.wdir / f'epoch{self.epoch}.pt')
+            torch.save(ckpt, self.wdir / f'epoch{self.epoch}.pt', pickle_module=pickle)
         del ckpt
 
     @staticmethod
@@ -479,6 +492,10 @@ class BaseTrainer:
         """
         raise NotImplementedError('get_dataloader function not implemented in trainer')
 
+    def build_dataset(self, img_path, mode='train', batch=None):
+        """Build dataset"""
+        raise NotImplementedError('build_dataset function not implemented in trainer')
+
     def criterion(self, preds, batch):
         """
         Returns loss and individual loss items as Tensor.
@@ -527,6 +544,10 @@ class BaseTrainer:
         """Plot and display metrics visually."""
         pass
 
+    def on_plot(self, name, data=None):
+        """Registers plots (e.g. to be consumed in callbacks)"""
+        self.plots[name] = {'data': data, 'timestamp': time.time()}
+
     def final_eval(self):
         """Performs final evaluation and validation for object detection YOLO model."""
         for f in self.last, self.best:
@@ -543,10 +564,15 @@ class BaseTrainer:
         resume = self.args.resume
         if resume:
             try:
-                last = Path(
-                    check_file(resume) if isinstance(resume, (str,
-                                                              Path)) and Path(resume).exists() else get_latest_run())
-                self.args = get_cfg(attempt_load_weights(last).args)
+                exists = isinstance(resume, (str, Path)) and Path(resume).exists()
+                last = Path(check_file(resume) if exists else get_latest_run())
+
+                # Check that resume data YAML exists, otherwise strip to force re-download of dataset
+                ckpt_args = attempt_load_weights(last).args
+                if not Path(ckpt_args['data']).exists():
+                    ckpt_args['data'] = self.args.data
+
+                self.args = get_cfg(ckpt_args)
                 self.args.model, resume = str(last), True  # reinstate
             except Exception as e:
                 raise FileNotFoundError('Resume checkpoint not found. Please pass a valid checkpoint to resume from, '
@@ -599,15 +625,19 @@ class BaseTrainer:
         Returns:
             optimizer (torch.optim.Optimizer): the built optimizer
         """
+
         g = [], [], []  # optimizer parameter groups
         bn = tuple(v for k, v in nn.__dict__.items() if 'Norm' in k)  # normalization layers, i.e. BatchNorm2d()
-        for v in model.modules():
-            if hasattr(v, 'bias') and isinstance(v.bias, nn.Parameter):  # bias (no decay)
-                g[2].append(v.bias)
-            if isinstance(v, bn):  # weight (no decay)
-                g[1].append(v.weight)
-            elif hasattr(v, 'weight') and isinstance(v.weight, nn.Parameter):  # weight (with decay)
-                g[0].append(v.weight)
+
+        for module_name, module in model.named_modules():
+            for param_name, param in module.named_parameters(recurse=False):
+                fullname = f'{module_name}.{param_name}' if module_name else param_name
+                if 'bias' in fullname:  # bias (no decay)
+                    g[2].append(param)
+                elif isinstance(module, bn):  # weight (no decay)
+                    g[1].append(param)
+                else:  # weight (with decay)
+                    g[0].append(param)
 
         if name == 'Adam':
             optimizer = torch.optim.Adam(g[2], lr=lr, betas=(momentum, 0.999))  # adjust beta1 to momentum
@@ -658,12 +688,17 @@ def check_amp(model):
     im = f if f.exists() else 'https://ultralytics.com/images/bus.jpg' if ONLINE else np.ones((640, 640, 3))
     prefix = colorstr('AMP: ')
     LOGGER.info(f'{prefix}running Automatic Mixed Precision (AMP) checks with YOLOv8n...')
+    warning_msg = "Setting 'amp=True'. If you experience zero-mAP or NaN losses you can disable AMP with amp=False."
     try:
         from ultralytics import YOLO
         # assert amp_allclose(YOLO('yolov8n.pt'), im)
         LOGGER.info(f'{prefix}checks passed ✅')
     except ConnectionError:
-        LOGGER.warning(f"{prefix}checks skipped ⚠️, offline and unable to download YOLOv8n. Setting 'amp=True'.")
+        LOGGER.warning(f'{prefix}checks skipped ⚠️, offline and unable to download YOLOv8n. {warning_msg}')
+    except (AttributeError, ModuleNotFoundError):
+        LOGGER.warning(
+            f'{prefix}checks skipped ⚠️. Unable to load YOLOv8n due to possible Ultralytics package modifications. {warning_msg}'
+        )
     except AssertionError:
         LOGGER.warning(f'{prefix}checks failed ❌. Anomalies were detected with AMP on your system that may lead to '
                        f'NaN losses or zero-mAP results, so AMP will be disabled during training.')

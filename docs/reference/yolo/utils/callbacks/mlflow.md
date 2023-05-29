@@ -1,3 +1,7 @@
+---
+description: Track model performance and metrics with MLflow in YOLOv5. Use callbacks like on_pretrain_routine_end or on_train_end to log information.
+---
+
 # on_pretrain_routine_end
 ---
 :::ultralytics.yolo.utils.callbacks.mlflow.on_pretrain_routine_end
@@ -6,11 +10,6 @@
 # on_fit_epoch_end
 ---
 :::ultralytics.yolo.utils.callbacks.mlflow.on_fit_epoch_end
-<br><br>
-
-# on_model_save
----
-:::ultralytics.yolo.utils.callbacks.mlflow.on_model_save
 <br><br>
 
 # on_train_end
