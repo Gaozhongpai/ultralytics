@@ -2,8 +2,6 @@
 from copy import copy
 
 import numpy as np
-import torch
-import torch.nn as nn
 
 from ultralytics.nn.tasks import DetectionModel
 from ultralytics.yolo import v8
@@ -11,10 +9,7 @@ from ultralytics.yolo.data import build_dataloader, build_yolo_dataset
 from ultralytics.yolo.data.dataloaders.piloader import create_dataloader
 from ultralytics.yolo.engine.trainer import BaseTrainer
 from ultralytics.yolo.utils import DEFAULT_CFG, LOGGER, RANK, colorstr
-from ultralytics.yolo.utils.loss import BboxLoss
-from ultralytics.yolo.utils.ops import xywh2xyxy
 from ultralytics.yolo.utils.plotting import plot_images, plot_labels, plot_results
-from ultralytics.yolo.utils.tal import TaskAlignedAssigner, dist2bbox, make_anchors
 from ultralytics.yolo.utils.torch_utils import de_parallel, torch_distributed_zero_first
 
 
@@ -90,12 +85,6 @@ class DetectionTrainer(BaseTrainer):
         self.loss_names = 'box_loss', 'cls_loss', 'dfl_loss', 'bh_loss'
         return v8.detect.DetectionValidator(self.test_loader, save_dir=self.save_dir, args=copy(self.args))
 
-    def criterion(self, preds, batch):
-        """Compute loss for YOLO prediction and ground-truth."""
-        if not hasattr(self, 'compute_loss'):
-            self.compute_loss = Loss(de_parallel(self.model))
-        return self.compute_loss(preds, batch)
-
     def label_loss_items(self, loss_items=None, prefix='train'):
         """
         Returns a loss dict with labelled training loss items tensor
@@ -134,8 +123,6 @@ class DetectionTrainer(BaseTrainer):
         cls = np.concatenate([lb['cls'] for lb in self.train_loader.dataset.labels], 0)
         plot_labels(boxes, cls.squeeze(), names=self.data['names'], save_dir=self.save_dir, on_plot=self.on_plot)
 
-
-# Criterion class for computing training losses
 class Loss:
 
     def __init__(self, model):  # model must be de-paralleled
@@ -254,7 +241,6 @@ class Loss:
         loss[3] *= self.hyp.bh  # rot gain
 
         return loss.sum() * batch_size, loss.detach()  # loss(box, cls, dfl)
-
 
 def train(cfg=DEFAULT_CFG, use_python=False):
     """Train and optimize YOLO model given training data and device."""
