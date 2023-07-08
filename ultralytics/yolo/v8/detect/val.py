@@ -32,11 +32,11 @@ class DetectionValidator(BaseValidator):
         """Preprocesses batch of images for YOLO training."""
         batch['img'] = batch['img'].to(self.device, non_blocking=True)
         batch['img'] = (batch['img'].half() if self.args.half else batch['img'].float()) / 255
-        for k in ['batch_idx', 'cls', 'bh', 'bboxes']:
+        for k in ['batch_idx', 'cls', 'bhboxes', 'bboxes']:
             batch[k] = batch[k].to(self.device)
 
         nb = len(batch['img'])
-        self.lb = [torch.cat([batch['cls'], batch['bboxes'], batch['bh']], dim=-1)[batch['batch_idx'] == i]
+        self.lb = [torch.cat([batch['cls'], batch['bboxes'], batch['bhboxes']], dim=-1)[batch['batch_idx'] == i]
                    for i in range(nb)] if self.args.save_hybrid else []  # for autolabelling
 
         return batch
@@ -75,7 +75,7 @@ class DetectionValidator(BaseValidator):
         for si, pred in enumerate(preds):
             idx = batch["batch_idx"] == si
             cls = batch["cls"][idx]
-            bh = batch["bh"][idx]
+            bhbox = batch["bhboxes"][idx]
             bbox = batch["bboxes"][idx]
             nl, npr = cls.shape[0], pred.shape[0]  # number of labels, predictions
             shape = batch['ori_shape'][si]
@@ -95,13 +95,19 @@ class DetectionValidator(BaseValidator):
             predn = pred.clone()
             ops.scale_boxes(batch['img'][si].shape[1:], predn[:, :4], shape,
                             ratio_pad=batch['ratio_pad'][si])  # native-space pred
+            ops.scale_boxes(batch['img'][si].shape[1:], predn[:, -4:], shape,
+                            ratio_pad=batch['ratio_pad'][si])  # native-space pred
 
             # Evaluate
             if nl:
                 height, width = batch['img'].shape[2:]
                 tbox = ops.xywh2xyxy(bbox) * torch.tensor(
                     (width, height, width, height), device=self.device)  # target boxes
+                bhtbox = ops.xywh2xyxy(bhbox) * torch.tensor(
+                    (width, height, width, height), device=self.device)  # target boxes
                 ops.scale_boxes(batch['img'][si].shape[1:], tbox, shape,
+                                ratio_pad=batch['ratio_pad'][si])  # native-space labels
+                ops.scale_boxes(batch['img'][si].shape[1:], bhtbox, shape,
                                 ratio_pad=batch['ratio_pad'][si])  # native-space labels
                 labelsn = torch.cat((cls, tbox), 1)  # native-space labels
                 correct_bboxes = self._process_batch(predn, labelsn)
@@ -194,6 +200,7 @@ class DetectionValidator(BaseValidator):
                            'the default YOLOv8 dataloader instead, no argument is needed.')
             gs = max(int(de_parallel(self.model).stride if self.model else 0), 32)
             return create_dataloader(path=dataset_path,
+                                     labels_dir=self.data["labels"],
                                      imgsz=self.args.imgsz,
                                      batch_size=batch_size,
                                      stride=gs,

@@ -47,7 +47,8 @@ class Detect(nn.Module):
         """Concatenates and returns predicted bounding boxes and class probabilities."""
         shape = x[0].shape  # BCHW
         for i in range(self.nl):
-            x[i] = torch.cat((self.cv2[i](x[i]), self.cv3[i](x[i]), 
+            x[i] = torch.cat((self.cv2[i](x[i]), 
+                              self.cv3[i](x[i]), 
                               self.cv4[i](x[i])), 1)
         if self.training:
             return x
@@ -63,7 +64,8 @@ class Detect(nn.Module):
         else:
             box, cls, bhbox = x_cat.split((self.reg_max * 4, self.nc, self.reg_max * 4), 1)
         dbox = dist2bbox(self.dfl(box), self.anchors.unsqueeze(0), xywh=True, dim=1) * self.strides
-        y = torch.cat((dbox, cls.sigmoid(), bhbox), 1)
+        bhdbox = dist2bbox(self.dflbh(bhbox), self.anchors.unsqueeze(0), xywh=True, dim=1) * self.strides
+        y = torch.cat((dbox, cls.sigmoid(), bhdbox), 1)
         return y if self.export else (y, x)
 
     def bias_init(self):

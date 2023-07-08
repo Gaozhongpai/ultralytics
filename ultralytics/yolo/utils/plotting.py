@@ -367,7 +367,7 @@ def plot_images(images,
 
             boxes = xywh2xyxy(bboxes[idx, :4]).T
             bhboxes = xywh2xyxy(bhbboxes[idx, :4]).T
-            conf = None if labels else bboxes[idx, 4]  # check for confidence presence (label vs pred)
+            conf = None if labels else bhbboxes[idx, 4]  # check for confidence presence (label vs pred)
 
             if boxes.shape[1]:
                 if boxes.max() <= 1.01:  # if normalized with tolerance 0.01

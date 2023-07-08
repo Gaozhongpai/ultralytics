@@ -144,7 +144,7 @@ def non_max_suppression(
         labels=(),
         max_det=300,
         nc=0,  # number of classes (optional)
-        max_time_img=0.05,
+        max_time_img=0.5,
         max_nms=30000,
         max_wh=7680,
 ):
@@ -189,8 +189,8 @@ def non_max_suppression(
     if mps:  # MPS not fully supported yet, convert tensors to CPU before NMS
         prediction = prediction.cpu()
     bs = prediction.shape[0]  # batch size
-    nc = nc or (prediction.shape[1] - 4 - 2)  # number of classes
-    nm = prediction.shape[1] - nc - 4 - 2
+    nc = nc or (prediction.shape[1] - 4 - 4)  # number of classes
+    nm = prediction.shape[1] - nc - 4 - 4
     mi = 4 + nc  # mask start index
     xc = prediction[:, 4:mi].amax(1) > conf_thres  # candidates
 
@@ -202,7 +202,7 @@ def non_max_suppression(
     merge = False  # use merge-NMS
 
     t = time.time()
-    output = [torch.zeros((1, 6 + 2 + nm), device=prediction.device)] * bs
+    output = [torch.zeros((1, 6 + 4 + nm), device=prediction.device)] * bs
     for xi, x in enumerate(prediction):  # image index, image inference
         # Apply constraints
         # x[((x[:, 2:4] < min_wh) | (x[:, 2:4] > max_wh)).any(1), 4] = 0  # width-height
@@ -221,8 +221,9 @@ def non_max_suppression(
             continue
 
         # Detections matrix nx6 (xyxy, conf, cls)
-        box, cls, bh, mask = x.split((4, nc, 2, nm), 1)
+        box, cls, bh, mask = x.split((4, nc, 4, nm), 1)
         box = xywh2xyxy(box)  # center_x, center_y, width, height) to (x1, y1, x2, y2)
+        bh = xywh2xyxy(bh) 
         if multi_label:
             i, j = (cls > conf_thres).nonzero(as_tuple=False).T
             x = torch.cat((box[i], x[i, 4 + j, None], j[:, None].float(), bh[i], mask[i]), 1)

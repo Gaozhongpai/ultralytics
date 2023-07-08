@@ -143,6 +143,7 @@ class v8DetectionLoss:
         else:
             i = targets[:, 0]  # image index
             _, counts = i.unique(return_counts=True)
+            counts = counts.to(dtype=torch.int32)
             out = torch.zeros(batch_size, counts.max(), 5+4, device=self.device)
             for j in range(batch_size):
                 matches = i == j
@@ -163,6 +164,7 @@ class v8DetectionLoss:
         return dist2bbox(pred_dist, anchor_points, xywh=False)
 
     def __call__(self, preds, batch):
+        """Calculate the sum of the loss for box, cls and dfl multiplied by batch size."""
         loss = torch.zeros(4, device=self.device)  # box, cls, dfl
         feats = preds[1] if isinstance(preds, tuple) else preds
         pred_distri, pred_scores, pred_distri_bh = torch.cat([xi.view(feats[0].shape[0], self.no, -1) for xi in feats], 2).split(
@@ -208,7 +210,7 @@ class v8DetectionLoss:
         # loss[1] = self.varifocal_loss(pred_scores, target_scores, target_labels) / target_scores_sum  # VFL way
         loss[1] = self.bce(pred_scores, target_scores.to(dtype)).sum() / target_scores_sum  # BCE
         idx_hands = target_labels>0
-        
+
         # bbox loss
         if fg_mask.sum():
             loss[0], loss[2], loss[3] = self.bbox_loss(pred_distri, 
