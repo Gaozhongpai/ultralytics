@@ -80,7 +80,7 @@ class TaskAlignedAssigner(nn.Module):
         self.eps = eps
 
     @torch.no_grad()
-    def forward(self, pd_scores, pd_bhs, pd_bboxes, anc_points, gt_labels, gt_bhs, gt_bboxes, mask_gt):
+    def forward(self, pd_scores, pd_bboxes, pd_bhs,  anc_points, gt_labels, gt_bboxes, gt_bhs, mask_gt):
         """
         Compute the task-aligned assignment.
         Reference https://github.com/Nioolek/PPYOLOE_pytorch/blob/master/ppyoloe/assigner/tal_assigner.py
@@ -231,7 +231,7 @@ class TaskAlignedAssigner(nn.Module):
 
         # Assigned target boxes, (b, max_num_obj, 4) -> (b, h*w)
         target_bboxes = gt_bboxes.view(-1, 4)[target_gt_idx]
-        target_bhs = gt_bhs.view(-1, 2)[target_gt_idx]
+        target_bhs = gt_bhs.view(-1, 4)[target_gt_idx]
 
         # Assigned target scores
         target_labels.clamp_(0)

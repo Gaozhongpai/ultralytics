@@ -403,12 +403,12 @@ def labels_to_bodyhand_v3(labels):
     return bh
                   
 def labels_to_bodyhand(labels):
-    bh = labels[:, 1:3].copy()
+    bh = labels[:, 1:5].copy()
     for k, l1 in enumerate(labels):
         if l1[0] != 0: # l1[0] == 1 or 2 for hand
             for l2 in labels[max(k-2, 0):k+3]:
                 if (l1[-2:]==l2[-2:]).all() and l2[0]==0:
-                    bh[k, :2] = l2[1:3] # - l1[1:3] ## offset from the body to the part
+                    bh[k, :4] = l2[1:5] # - l1[1:3] ## offset from the body to the part
     return bh
           
 class LoadImagesAndLabels(Dataset):  # for training/testing
@@ -642,7 +642,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 img = np.flipud(img)
                 if nl:
                     labels[:, 2] = 1 - labels[:, 2]  # body bbox flipud
-                    bh[:, 0:1] = 1 - bh[:, 0:1] # body part or parts bbox flipud
+                    bh[:, 1:2] = 1 - bh[:, 1:2] # body part or parts bbox flipud
             # Flip left-right
             if random.random() < hyp['fliplr']:
                 img = np.fliplr(img)
@@ -709,10 +709,10 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         # cv2.imwrite("./debug/"+Path(self.img_files[index]).stem+".jpg", img_canvas)
 
 
-        labels_out = torch.zeros((nl, 1+5+2))
+        labels_out = torch.zeros((nl, 1+5+4))
         if nl:
             labels_out[:, 1:6] = torch.from_numpy(labels)
-            labels_out[:, 6:8] = torch.from_numpy(bh)
+            labels_out[:, 6:10] = torch.from_numpy(bh)
 
         # Convert
         img = img.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
@@ -726,7 +726,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         im, label, path, shapes = zip(*batch)  # transposed
         for i, lb in enumerate(label):
             lb[:, 0] = i  # add target image index for build_targets()
-        batch_idx, cls, bboxes, bh = torch.cat(label, 0).split((1, 1, 4, 2), dim=1)
+        batch_idx, cls, bboxes, bh = torch.cat(label, 0).split((1, 1, 4, 4), dim=1)
         return {
             'ori_shape': tuple((x[0] if x else None) for x in shapes),
             'ratio_pad': tuple((x[1] if x else None) for x in shapes),
@@ -734,7 +734,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             'img': torch.stack(im, 0),
             'cls': cls,
             'bboxes': bboxes,
-            'bh': bh,
+            'bhboxes': bh,
             'batch_idx': batch_idx.view(-1)}
 
     @staticmethod

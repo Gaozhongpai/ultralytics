@@ -303,8 +303,8 @@ def save_one_box(xyxy, im, file=Path('im.jpg'), gain=1.02, pad=10, square=False,
 def plot_images(images,
                 batch_idx,
                 cls,
-                bh,
                 bboxes,
+                bhbboxes,
                 masks=np.zeros(0, dtype=np.uint8),
                 kpts=np.zeros((0, 51), dtype=np.float32),
                 paths=None,
@@ -316,8 +316,8 @@ def plot_images(images,
         images = images.cpu().float().numpy()
     if isinstance(cls, torch.Tensor):
         cls = cls.cpu().numpy()
-    if isinstance(bh, torch.Tensor):
-        bh = bh.cpu().numpy()
+    if isinstance(bhbboxes, torch.Tensor):
+        bhbboxes = bhbboxes.cpu().numpy()
     if isinstance(bboxes, torch.Tensor):
         bboxes = bboxes.cpu().numpy()
     if isinstance(masks, torch.Tensor):
@@ -361,38 +361,37 @@ def plot_images(images,
             annotator.text((x + 5, y + 5), text=Path(paths[i]).name[:40], txt_color=(220, 220, 220))  # filenames
         if len(cls) > 0:
             idx = batch_idx == i
-
-            labels = bboxes.shape[1] == 4  # labels if no conf column
-            
-            boxes = xywh2xyxy(bboxes[idx, :4]).T
             classes = cls[idx].astype('int')
-            lines = np.concatenate([cls[idx][:, None], bboxes[idx, :2], bh[idx]], axis=1)
-            lines[:, 3:5] = lines[:, 3:5] if labels else lines[:, 3:5] + lines[:, 1:3] 
-            
+
+            labels = bhbboxes.shape[1] == 4  # labels if no conf column
+
+            boxes = xywh2xyxy(bboxes[idx, :4]).T
+            bhboxes = xywh2xyxy(bhbboxes[idx, :4]).T
             conf = None if labels else bboxes[idx, 4]  # check for confidence presence (label vs pred)
 
             if boxes.shape[1]:
                 if boxes.max() <= 1.01:  # if normalized with tolerance 0.01
                     boxes[[0, 2]] *= w  # scale to pixels
                     boxes[[1, 3]] *= h
-                    lines[:, [1, 3]] *= w
-                    lines[:, [2, 4]] *= h
+                    bhboxes[[0, 2]] *= w  # scale to pixels
+                    bhboxes[[1, 3]] *= h
                 elif scale < 1:  # absolute coords need scale if image scales
                     boxes *= scale
-                    lines[:, 1:5] *= scale
+                    bhboxes *= scale
             boxes[[0, 2]] += x
             boxes[[1, 3]] += y
-            lines[:, [1, 3]] += x
-            lines[:, [2, 4]] += y
+            bhboxes[[0, 2]] += x
+            bhboxes[[1, 3]] += y
+            
             for j, box in enumerate(boxes.T.tolist()):
                 c = classes[j]
+                bhbox = bhboxes[:, j]
                 color = colors((c+1)*5 % 20)
                 c = names.get(c, c) if names else c
                 if labels or conf[j] > 0.25:  # 0.25 conf thresh
                     # label = f'{c}' if labels else f'{c} {conf[j]:.1f}'
-                    if lines[j, 0] != 0:
-                        annotator.line((int(lines[j, 1]), int(lines[j, 2]), int(lines[j, 3]), int(lines[j, 4])),
-                                       (255, 0, 0))
+                    if c != 0:
+                        annotator.box_label(bhbox, color=color)
                     label = '%s' % (c) if labels else '%s %.1f' % (c, conf[j])
                     annotator.box_label(box, label, color=color)
 
@@ -488,11 +487,11 @@ def output_to_target(output, max_det=300):
     """Convert model output to target format [batch_id, class_id, x, y, w, h, conf] for plotting."""
     targets = []
     for i, o in enumerate(output):
-        box, conf, cls, bh1, bh2 = o[:max_det].cpu().split((4, 1, 1, 1, 1), 1)
+        box, conf, cls, bhbox = o[:max_det].cpu().split((4, 1, 1, 4), 1)
         j = torch.full((conf.shape[0], 1), i)
-        targets.append(torch.cat((j, cls, bh1, bh2, xyxy2xywh(box), conf), 1))
+        targets.append(torch.cat((j, cls, xyxy2xywh(box), xyxy2xywh(bhbox), conf), 1))
     targets = torch.cat(targets, 0).numpy()
-    return targets[:, 0], targets[:, 1],  targets[:, 2:4], targets[:, 4:]
+    return targets[:, 0], targets[:, 1],  targets[:, 2:6], targets[:, 6:]
 
 
 def feature_visualization(x, module_type, stage, n=32, save_dir=Path('runs/detect/exp')):

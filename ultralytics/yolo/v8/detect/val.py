@@ -214,8 +214,8 @@ class DetectionValidator(BaseValidator):
         plot_images(batch["img"],
                     batch["batch_idx"],
                     batch["cls"].squeeze(-1),
-                    batch["bh"],
                     batch["bboxes"],
+                    batch["bhboxes"],
                     paths=batch["im_file"],
                     fname=self.save_dir / f"val_batch{ni}_labels.jpg",
                     names=self.names)

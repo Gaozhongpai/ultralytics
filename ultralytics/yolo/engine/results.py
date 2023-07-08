@@ -392,9 +392,9 @@ class Boxes(BaseTensor):
         if boxes.ndim == 1:
             boxes = boxes[None, :]
         n = boxes.shape[-1]  # xyxy, conf, cls, rot
-        assert n in (6+2, 7+2), f'expected `n` in [6, 7], but got {n}'  # xyxy, (track_id), conf, cls, bh
+        assert n in (6+4, 7+4), f'expected `n` in [6, 7], but got {n}'  # xyxy, (track_id), conf, cls, bh
         # TODO
-        self.is_track = n == 7+2
+        self.is_track = n == 7+4
         self.orig_shape = torch.as_tensor(orig_shape, device=boxes.device) if isinstance(boxes, torch.Tensor) \
             else np.asarray(orig_shape)
 
@@ -406,16 +406,16 @@ class Boxes(BaseTensor):
     @property
     def conf(self):
         """Return the confidence values of the boxes."""
-        return self.data[:, -4]
+        return self.data[:, -6]
 
     @property
     def cls(self):
         """Return the class values of the boxes."""
-        return self.data[:, -3]
+        return self.data[:, -5]
 
     def bh(self):
         """Return the class values of the boxes."""
-        return self.data[:, -2:]
+        return self.data[:, -4:]
 
     @property
     def id(self):
