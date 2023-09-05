@@ -1,6 +1,6 @@
 import argparse
 
-from ultralytics.yolo.utils.eval.database import Database
+from utils.eval.database import Database
 
 dbName = 'human'
 def compute_APMR(dt_path, gt_path, target_key=None, mode=0, if_face=False, body_part='body'):

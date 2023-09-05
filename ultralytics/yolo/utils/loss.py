@@ -69,7 +69,7 @@ class BboxLoss(nn.Module):
 
         iou_bh = bbox_iou(pred_bboxes_bh[fg_mask], target_bhs[fg_mask], xywh=False, CIoU=True)
         loss_iou_bh = ((1.0 - iou_bh) * weight).sum() / target_scores_sum
-        if (fg_mask*idx_hands).sum() == 0:
+        if (fg_mask).sum() == 0:
             loss_iou_bh = 0.0
         # DFL loss
         if self.use_dfl:

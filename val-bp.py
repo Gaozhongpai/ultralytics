@@ -23,6 +23,7 @@ import pickle
 
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
+from ultralytics.yolo.utils.metrics import bbox_ioa
 
 from ultralytics.yolo.utils.bp_eval import body_part_association_evaluation
 
@@ -65,6 +66,9 @@ def post_process_batch(data, imgs, paths, shapes, body_dets, part_dets):
     batch_parts_dict = {}
     img_indexs = []
     color = Colors()
+    num = 1
+    if data['dataset'] == "BodyHands":
+        num = num + 1
     # process each image in batch
     for si, (bdet, pdet) in enumerate(zip(body_dets, part_dets)):
         nbody, npart = bdet.shape[0], pdet.shape[0]
@@ -77,16 +81,10 @@ def post_process_batch(data, imgs, paths, shapes, body_dets, part_dets):
                 
             ## part 
             bboxes = scale_boxes(imgs[si].shape[1:], pdet[:, :4], shape, shapes[si][1]).cpu().numpy()
+            bp_bboxes = scale_boxes(imgs[si].shape[1:], pdet[:, -4:], shape, shapes[si][1]).cpu().numpy()
             px1, py1, px2, py2 = bboxes[:, 0], bboxes[:, 1], bboxes[:, 2], bboxes[:, 3]
             conf, cls = pdet[:, 4].cpu().numpy(), pdet[:, 5].cpu().numpy()
             p_xc, p_yc = np.mean((px1, px2), axis=0), np.mean((py1, py2), axis=0)
-
-            # rot, length = pdet[:, -2], pdet[:, -1]
-            dx, dy = pdet[:, -2], pdet[:, -1]
-            height, width = imgs[si].shape[1:]
-            dd_temp = torch.stack([dx, dy, dx, dy], dim=-1) * torch.tensor((width, height, width, height)).to(pdet)
-            dd_temp_np = scale_boxes(imgs[si].shape[1:], dd_temp, shape, shapes[si][1], False).cpu().numpy()
-            points = np.stack([p_xc + dd_temp_np[:, 0], p_yc + dd_temp_np[:, 1]], axis=-1)
             
             # img = cv2.imread(paths[si])
             # for k, b_bbox in enumerate(bboxes):
@@ -100,26 +98,24 @@ def post_process_batch(data, imgs, paths, shapes, body_dets, part_dets):
             ## body 
             scores = bdet[:, 4].cpu().numpy()  # body detection score
             b_bboxes = scale_boxes(imgs[si].shape[1:], bdet[:, :4].clone(), shape, shapes[si][1]).cpu().numpy()
-            bx1, by1, bx2, by2 = b_bboxes[:, 0], b_bboxes[:, 1], b_bboxes[:, 2], b_bboxes[:, 3]
-            b_xc, b_yc = np.mean((bx1, bx2), axis=0), np.mean((by1, by2), axis=0)
-            b_points = np.stack([b_xc, b_yc], axis=-1)
-            matched_part_ids = [-1 for i in range(points.shape[0])]  # points shape is n*c*7, add in 2022-12-09
-            part_pts = np.zeros((nbody, 2, 7))
+            matched_part_ids = [-1 for i in range(bp_bboxes.shape[0])]  # points shape is n*c*7, add in 2022-12-09
+            
+            part_pts = np.zeros((nbody, num, 7))
             
             batch_parts_dict[str(img_id)] = []
-            for id, point in enumerate(points):
-                dist = np.linalg.norm(point[None]-b_points, axis=-1)
-                sorted_indices = np.argsort(dist)
+            for id, bp_bbox in enumerate(bp_bboxes):
+                iou = bbox_ioa(bp_bbox[None], b_bboxes)[0]
+                sorted_indices = np.argsort(iou)[::-1]
                 # pt_match = np.argmin(dist)
                 i = 0
                 pt_match = sorted_indices[i]
                 count = np.count_nonzero(matched_part_ids == pt_match)
                 batch_parts_dict[str(img_id)].append([px1[id], py1[id], px2[id], py2[id], conf[id], cls[id]])
-                while (count > 1) and (i < nbody-1): ## maximum two hands
+                while (count > num-1) and (i < nbody-1): ## maximum two hands
                     i = i + 1
                     pt_match = sorted_indices[i]
                     count = np.count_nonzero(matched_part_ids == pt_match)
-                if count < 2 and (p_xc[id]> b_bboxes[pt_match][0] and ## hand is within body 
+                if count < num and (p_xc[id]> b_bboxes[pt_match][0] and ## hand is within body 
                                   p_xc[id]< b_bboxes[pt_match][2] and 
                                   p_yc[id]> b_bboxes[pt_match][1] and 
                                   p_yc[id]< b_bboxes[pt_match][3]):
@@ -138,11 +134,11 @@ def post_process_batch(data, imgs, paths, shapes, body_dets, part_dets):
                         cv2.rectangle(img, (int(x0), int(y0)), (int(x1), int(y1)), c, thickness=4)
                         cv2.line(img, (int(x0), int(y0)), (int(bx0), int(by0)), c, thickness=4)
             
-            for k, b_bbox in enumerate(bboxes):
-                c = color(int(k*color.n/len(b_bboxes)))
-                bx0, by0, bx1, by1 = b_bbox
-                px, py = points[k, 0], points[k, 1]
-                cv2.line(img, (int(bx0), int(by0)), (int(px), int(py)), c, thickness=4)
+            # for k, b_bbox in enumerate(bboxes):
+            #     c = color(int(k*color.n/len(b_bboxes)))
+            #     bx0, by0, bx1, by1 = b_bbox
+            #     px, py = points[k, 0], points[k, 1]
+            #     cv2.line(img, (int(bx0), int(by0)), (int(px), int(py)), c, thickness=4)
             Path("./runs/debug/").mkdir(parents=True, exist_ok=True)
             cv2.imwrite("./runs/debug/"+Path(paths[si]).stem+".jpg", img)
                         
@@ -192,7 +188,7 @@ def run(opt, data,
         half=True
         # Load model
         
-        model = YOLO('yolov8l.yaml').load(weights)
+        model = YOLO('yolov8m.yaml').load(weights)
         model = AutoBackend(model.model, device=device, dnn=False, data=None, fp16=half)
         stride, pt, jit, engine = model.stride, model.pt, model.jit, model.engine            
         imgsz = check_img_size(imgsz, s=stride)  # check image size
@@ -227,7 +223,7 @@ def run(opt, data,
         if device.type != 'cpu':
             model(torch.zeros(1, 3, imgsz, imgsz).to(device).type_as(next(model.parameters())))  # run once
         task = task if task in ('train', 'val', 'test') else 'val'  # path to train/val/test images
-        dataloader = create_dataloader(data[task], imgsz, batch_size, gs, 
+        dataloader = create_dataloader(data[task], data["labels"], imgsz, batch_size, gs, 
                                        pad=pad, rect=rect, quad=True, prefix=colorstr(f'{task}: '))[0]
 
     color = Colors()

@@ -4,7 +4,7 @@ import torch
 import numpy as np
 import json
 
-from ultralytics.yolo.utils.eval import misc_utils
+from utils.eval import misc_utils
 
 class COCO(object):
     def __init__(self, gt_json, dt_json = None, if_have_face = False):
