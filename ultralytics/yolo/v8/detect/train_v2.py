@@ -184,7 +184,7 @@ class Loss:
         return dist2bbox(pred_dist, anchor_points, xywh=False)
     
     def bh_decode(self, anchor_points, pred_bh):
-        xcyc = anchor_points + pred_bh
+        xcyc = (pred_bh * 2.0 + (anchor_points - 0.5))
         return xcyc
     
     def __call__(self, preds, batch):
@@ -196,7 +196,6 @@ class Loss:
         pred_scores = pred_scores.permute(0, 2, 1).contiguous()
         pred_distri = pred_distri.permute(0, 2, 1).contiguous()
         pred_bh = pred_bh.permute(0, 2, 1).contiguous()
-        pred_bh = pred_bh.sigmoid() - 0.5
 
         dtype = pred_scores.dtype
         batch_size = pred_scores.shape[0]
@@ -214,9 +213,9 @@ class Loss:
 
         # pboxes
         pred_bboxes = self.bbox_decode(anchor_points, pred_distri)  # xyxy, (b, h*w, 4)
-        pred_bh = self.bh_decode(anchor_points, pred_bh * (imgsz / stride_tensor)[None])  # xyxy, (b, h*w, 4)
+        pred_bh = self.bh_decode(anchor_points, pred_bh)  # xyxy, (b, h*w, 4)  # xyxy, (b, h*w, 4)
 
-        target_labels, target_bboxes, target_scores, fg_mask, _ = self.assigner(
+        _, target_bboxes, target_scores, fg_mask, _ = self.assigner(
             pred_scores.detach().sigmoid(), 
             (pred_bboxes.detach() * stride_tensor).type(gt_bboxes.dtype),
             anchor_points * stride_tensor, 
@@ -224,7 +223,7 @@ class Loss:
             gt_bboxes, 
             mask_gt)
         
-        target_bhs_2, fg_mask_2, target_gt_idx_2 = self.assigner_bh(
+        target_labels_2, target_bhs_2, fg_mask_2, target_gt_idx_2 = self.assigner_bh(
             pred_scores.detach().sigmoid(), 
             pred_bh,
             (pred_bboxes.detach() * stride_tensor).type(gt_bboxes.dtype),
@@ -234,7 +233,7 @@ class Loss:
             gt_bboxes, 
             mask_gt)
         
-        idx_hands = target_labels>0
+        idx_hands = target_labels_2>0
         
         # color = Colors()
         # anchors_p = (anchor_points * stride_tensor)[(fg_mask_2)[0]].detach().cpu().numpy().astype(np.int32)
@@ -255,7 +254,8 @@ class Loss:
         target_bhs_2 /= stride_tensor
         target_scores_sum = max(target_scores.sum(), 1)
         
-        loss[3] = self.l1(target_bhs_2[fg_mask_2], pred_bh[fg_mask_2]) 
+        loss[3] = self.l1(target_bhs_2[fg_mask_2*idx_hands], pred_bh[fg_mask_2*idx_hands]) \
+            if (fg_mask_2*idx_hands).sum() > 0 else 0
         # cls loss
         # loss[1] = self.varifocal_loss(pred_scores, target_scores, target_labels) / target_scores_sum  # VFL way
         loss[1] = self.bce(pred_scores, target_scores.to(dtype)).sum() / target_scores_sum  # BCE
@@ -273,7 +273,7 @@ class Loss:
         loss[0] *= self.hyp.box  # box gain
         loss[1] *= self.hyp.cls  # cls gain
         loss[2] *= self.hyp.dfl  # dfl gain
-        loss[3] *= self.hyp.bh / 25 # rot gain
+        loss[3] *= self.hyp.bh / 20 # rot gain
 
         return loss.sum() * batch_size, loss.detach()  # loss(box, cls, dfl)
 

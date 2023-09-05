@@ -350,7 +350,7 @@ def plot_images(images,
             boxes = xywh2xyxy(bboxes[idx, :4]).T
             classes = cls[idx].astype('int')
             lines = np.concatenate([cls[idx][:, None], bboxes[idx, :2], bh[idx]], axis=1)
-            lines[:, 3:5] = lines[:, 3:5] if labels else lines[:, 3:5] + lines[:, 1:3] 
+            lines[:, 3:5] = lines[:, 3:5] # if labels else lines[:, 3:5] + lines[:, 1:3] 
             
             conf = None if labels else bboxes[idx, 4]  # check for confidence presence (label vs pred)
 

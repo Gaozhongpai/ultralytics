@@ -489,7 +489,8 @@ class Detect(nn.Module):
         else:
             box, cls, bh = x_cat.split((self.reg_max * 4, self.nc, 2), 1)
         dbox = dist2bbox(self.dfl(box), self.anchors.unsqueeze(0), xywh=True, dim=1) * self.strides
-        y = torch.cat((dbox, cls.sigmoid(), bh.sigmoid() - 0.5), 1)
+        dbh = (bh * 2.0 + (self.anchors - 0.5)) * self.strides
+        y = torch.cat((dbox, cls.sigmoid(), dbh), 1)
         return y if self.export else (y, x)
 
     def bias_init(self):

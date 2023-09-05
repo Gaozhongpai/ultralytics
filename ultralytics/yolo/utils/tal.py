@@ -55,9 +55,9 @@ def select_highest_overlaps(mask_pos_ori, overlaps, n_max_boxes, is_bh=False):
     if is_bh:
         bool_mask = fg_mask.bool()
         # Mask target_gt_idx and check where it's equal to 0
-        mask1 = target_gt_idx[bool_mask] == 0
+        mask1 = target_gt_idx[bool_mask] == 0 ## the first object after overlay selection
         # Mask the first column of mask_pos_ori and check where it's greater than 0
-        mask2 = mask_pos_ori[:, 0][bool_mask] > 0
+        mask2 = mask_pos_ori[:, 0][bool_mask] > 0  ## the first object before overlay selection
         # Compare the two masks and apply result to fg_mask
         if (mask1 > mask2).sum() > 0:
             # print((mask1 > mask2).sum())
@@ -83,10 +83,9 @@ class TaskAlignedAssignerBH(nn.Module):
         eps (float): A small value to prevent division by zero.
     """
 
-    def __init__(self, topk=13, num_classes=80, alpha=1.0, beta=6.0, eps=1e-9, is_bh=True):
+    def __init__(self, topk=100, num_classes=80, alpha=1.0, beta=6.0, eps=1e-9, is_bh=True):
         """Initialize a TaskAlignedAssigner object with customizable hyperparameters."""
         super().__init__()
-        self.topk = topk
         self.num_classes = num_classes
         self.bg_idx = num_classes
         self.alpha = alpha
@@ -120,7 +119,8 @@ class TaskAlignedAssignerBH(nn.Module):
 
         if self.n_max_boxes == 0:
             device = gt_bboxes.device
-            return (torch.zeros_like(pd_bhs).to(device), 
+            return (torch.full_like(pd_scores[..., 0], self.bg_idx).to(device), 
+                    torch.zeros_like(pd_bhs).to(device), 
                     torch.zeros_like(pd_scores[..., 0]).to(device),
                     torch.zeros_like(pd_scores[..., 0]).to(device))
 
@@ -130,10 +130,10 @@ class TaskAlignedAssignerBH(nn.Module):
         target_gt_idx, fg_mask, mask_pos = select_highest_overlaps(mask_pos, overlaps, self.n_max_boxes, is_bh=self.is_bh)
 
         # assigned target
-        target_bhs = self.get_targets(gt_labels, gt_bhs, target_gt_idx)
+        target_labels, target_bhs = self.get_targets(gt_labels, gt_bhs, target_gt_idx)
 
 
-        return target_bhs, fg_mask.bool(), target_gt_idx
+        return target_labels, target_bhs, fg_mask.bool(), target_gt_idx
 
     def get_pos_mask(self, pd_scores, pd_bboxes, gt_labels, gt_bboxes, anc_points, mask_gt):
         """Get in_gts mask, (b, max_num_obj, h*w)."""
@@ -164,38 +164,6 @@ class TaskAlignedAssignerBH(nn.Module):
         align_metric = bbox_scores.pow(self.alpha) * overlaps.pow(self.beta)
         return align_metric, overlaps
 
-    def select_topk_candidates(self, metrics, largest=True, topk_mask=None):
-        """
-        Select the top-k candidates based on the given metrics.
-
-        Args:
-            metrics (Tensor): A tensor of shape (b, max_num_obj, h*w), where b is the batch size,
-                              max_num_obj is the maximum number of objects, and h*w represents the
-                              total number of anchor points.
-            largest (bool): If True, select the largest values; otherwise, select the smallest values.
-            topk_mask (Tensor): An optional boolean tensor of shape (b, max_num_obj, topk), where
-                                topk is the number of top candidates to consider. If not provided,
-                                the top-k values are automatically computed based on the given metrics.
-
-        Returns:
-            (Tensor): A tensor of shape (b, max_num_obj, h*w) containing the selected top-k candidates.
-        """
-
-        num_anchors = metrics.shape[-1]  # h*w
-        # (b, max_num_obj, topk)
-        topk_metrics, topk_idxs = torch.topk(metrics, self.topk, dim=-1, largest=largest)
-        if topk_mask is None:
-            topk_mask = (topk_metrics.max(-1, keepdim=True) > self.eps).tile([1, 1, self.topk])
-        # (b, max_num_obj, topk)
-        topk_idxs[~topk_mask] = 0
-        # (b, max_num_obj, topk, h*w) -> (b, max_num_obj, h*w)
-        is_in_topk = torch.zeros(metrics.shape, dtype=torch.long, device=metrics.device)
-        for it in range(self.topk):
-            is_in_topk += F.one_hot(topk_idxs[:, :, it], num_anchors)
-        # is_in_topk = F.one_hot(topk_idxs, num_anchors).sum(-2)
-        # filter invalid bboxes
-        is_in_topk = torch.where(is_in_topk > 1, 0, is_in_topk)
-        return is_in_topk.to(metrics.dtype)
 
     def get_targets(self, gt_labels, gt_bhs, target_gt_idx):
         """
@@ -225,11 +193,13 @@ class TaskAlignedAssignerBH(nn.Module):
         # Assigned target labels, (b, 1)
         batch_ind = torch.arange(end=self.bs, dtype=torch.int64, device=gt_labels.device)[..., None]
         target_gt_idx = target_gt_idx + batch_ind * self.n_max_boxes  # (b, h*w)
-
+        target_labels = gt_labels.long().flatten()[target_gt_idx]  # (b, h*w)
         # Assigned target boxes, (b, max_num_obj, 4) -> (b, h*w)
         target_bhs = gt_bhs.view(-1, 2)[target_gt_idx]
+        
+        target_labels.clamp(0)
 
-        return target_bhs
+        return target_labels, target_bhs
     
 
 class TaskAlignedAssigner(nn.Module):

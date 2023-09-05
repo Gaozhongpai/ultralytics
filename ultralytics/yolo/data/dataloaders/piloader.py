@@ -96,7 +96,11 @@ def create_dataloader(path, imgsz, batch_size, stride, hyp=None, augment=False, 
                       rank=-1, world_size=1, workers=8, close_mosaic=False, image_weights=False, quad=False, prefix='', shuffle=False, seed=0):
     # Make sure only the first process in DDP process the dataset first, and the following others can use the cache
     with torch_distributed_zero_first(rank):
-        labels_dir = "yolov5_style_hand"
+        labels_dir = ""
+        if "coco" in path:
+            labels_dir = "yolov5_style_parts"
+        elif "BodyHands" in path:
+            labels_dir = "yolov5_style_hand"
         dataset = LoadImagesAndLabels(path, labels_dir, imgsz, batch_size,
                                       augment=augment,  # augment images
                                       hyp=hyp,  # augmentation hyperparameters
@@ -371,6 +375,8 @@ class LoadStreams:  # multiple IP or RTSP cameras
 
 
 def img2label_paths(img_paths, image_dir='images', labels_dir='labels'):
+    if "coco" in list(img_paths)[0]:
+        image_dir = "JointBodyPart/images"
     return [os.path.splitext(s.replace(image_dir, labels_dir))[0] + '.txt' for s in img_paths]
 
 
@@ -400,12 +406,12 @@ def labels_to_bodyhand_v3(labels):
                     bh[k, 0] = NormalizeRadians(kTargetAngle - math.atan2(-y1, x1)) / math.pi
                     bh[k, 1] = math.sqrt(x1**2 + y1**2)
     return bh
-                  
+
 def labels_to_bodyhand(labels):
     bh = labels[:, 1:3].copy()
     for k, l1 in enumerate(labels):
         if l1[0] != 0: # l1[0] == 1 or 2 for hand
-            for l2 in labels[max(k-2, 0):k+3]:
+            for l2 in labels[max(k-2, 0):k+8]:
                 if (l1[-2:]==l2[-2:]).all() and l2[0]==0:
                     bh[k, :2] = l2[1:3] # - l1[1:3] ## offset from the body to the part
     return bh
@@ -473,7 +479,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         for i, lbs in enumerate(self.labels):
             self.labels[i] = np.asarray([np.concatenate([label[:5], (label[1:3]*100 if label[0] == 0 \
                 else label[5:7]*100)]) for label in lbs[:, :7]])
-            
+
         self.shapes = np.array(shapes, dtype=np.float64)
         self.img_files = list(cache.keys())  # update
         self.label_files = img2label_paths(cache.keys(), labels_dir=self.labels_dir)  # update
@@ -482,7 +488,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 x[:, 0] = 0
 
         n = len(shapes)  # number of images
-        bi = np.floor(np.arange(n) / batch_size).astype(np.int32)  # batch index
+        bi = np.floor(np.arange(n) / batch_size).astype(np.int)  # batch index
         nb = bi[-1] + 1  # number of batches
         self.batch = bi  # batch index of image
         self.n = n
@@ -510,7 +516,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 elif mini > 1:
                     shapes[i] = [1, 1 / mini]
 
-            self.batch_shapes = np.ceil(np.array(shapes) * img_size / stride + pad).astype(np.int32) * stride
+            self.batch_shapes = np.ceil(np.array(shapes) * img_size / stride + pad).astype(np.int) * stride
 
         # Cache images into memory for faster training (WARNING: large datasets may exceed system RAM)
         self.imgs, self.img_npy = [None] * n, [None] * n
@@ -608,8 +614,8 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             labels = self.labels[index].copy()
             if labels.size:  # normalized xywh to pixel xyxy format
                 labels[:, 1:5] = xywhn2xyxy(labels[:, 1:5], ratio[0] * w, ratio[1] * h, padw=pad[0], padh=pad[1])
-            i = box_candidates(cls=labels[:, 0], box1=labels[:, 1:5].T, box2=labels[:, 1:5].T, area_thr=0.1)
-            labels = labels[i]
+            # i = box_candidates(cls=labels[:, 0], box1=labels[:, 1:5].T, box2=labels[:, 1:5].T, area_thr=0.1)
+            # labels = labels[i]
 
         if self.augment:
             # Augment imagespace
@@ -622,6 +628,10 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                                                  perspective=hyp['perspective'])
 
         nl = len(labels)  # number of labels
+        while(nl==0):
+           img, labels = load_mosaic(self, index) 
+           nl = len(labels)
+            
         if nl:
             labels[:, 1:5] = xyxy2xywhn(labels[:, 1:5], w=img.shape[1], h=img.shape[0], clip=True, eps=1E-3)
             # labels[:, 1:5] = xyxy2xywhn(labels[:, 1:5], w=img.shape[1], h=img.shape[0], clip=True, eps=1E-3)
@@ -635,6 +645,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
             # HSV color-space
             augment_hsv(img, hgain=hyp['hsv_h'], sgain=hyp['hsv_s'], vgain=hyp['hsv_v'])
+            swap_dict = {3: 4, 4: 3, 5: 6, 6: 5}
 
             # Flip up-down
             if random.random() < hyp['flipud']:
@@ -642,12 +653,18 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 if nl:
                     labels[:, 2] = 1 - labels[:, 2]  # body bbox flipud
                     bh[:, 0:1] = 1 - bh[:, 0:1] # body part or parts bbox flipud
+                    for ll in range(nl):
+                        if labels[ll, 0] in swap_dict:
+                            labels[ll, 0] = swap_dict[labels[ll, 0]]
             # Flip left-right
             if random.random() < hyp['fliplr']:
                 img = np.fliplr(img)
                 if nl:
                     labels[:, 1] = 1 - labels[:, 1]  # body bbox fliplr
                     bh[:, 0:1] = 1 - bh[:, 0:1]  # body part or parts bbox fliplr
+                    for ll in range(nl):
+                        if labels[ll, 0] in swap_dict:
+                            labels[ll, 0] = swap_dict[labels[ll, 0]]
 
             # Cutouts
             # labels = cutout(img, labels, p=0.5)
@@ -670,6 +687,12 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         #     cv2.line(img_canvas, pt1, part_pt, (255, 255, 0), thickness=2, lineType=cv2.LINE_AA)
         # cv2.imwrite("./debug/"+Path(self.img_files[index]).stem+".jpg", img_canvas)
 
+        labels_out = torch.zeros((nl, 1+5+2))
+        if nl:
+            labels_out[:, 1:6] = torch.from_numpy(labels)
+            labels_out[:, 6:8] = torch.from_numpy(bh)
+        
+        # labels = labels_out[:, 1:].numpy()
         # img_h, img_w = img.shape[:2]
         # img_canvas = img.copy()
         # body_obj = labels[labels[:, 0] == 0]
@@ -680,16 +703,16 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         #     pt2 = (int((xc + w / 2) * img_w), int((yc + h / 2) * img_h))
         #     cv2.rectangle(img_canvas, pt1, pt2, (0, 0, 255), thickness=2)
         #     parts = lbl[5:]
-        #     parts = np.array(parts).reshape(-1, 3)
+        #     parts = np.array(parts).reshape(-1, 2)
         #     parts[:, 0] = parts[:, 0] * img_w
         #     parts[:, 1] = parts[:, 1] * img_h
-        #     for i, (x, y, v) in enumerate(parts):
-        #         if v:
+        #     for i, (x, y) in enumerate(parts):
+        #         # if v:
         #             part_pt = (int(round(x)), int(round(y)))
         #             cv2.circle(img_canvas, part_pt, 2, (0, 255, 0), thickness=2)
         #             cv2.line(img_canvas, pt1, part_pt, (255, 255, 0), thickness=2, lineType=cv2.LINE_AA)
         # cv2.imwrite("./debug/"+Path(self.img_files[index]).stem+".jpg", img_canvas)
-
+        
         # for lbl in body_obj:
         #     xc, yc, w, h = lbl[1:5].copy()
         #     pt1 = (int((xc - w / 2) * img_w), int((yc - h / 2) * img_h))
@@ -697,22 +720,16 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         #     cv2.rectangle(img_canvas, pt1, pt2, (0, 0, 255), thickness=2)
             
         #     parts = lbl[5:]
-        #     parts = np.array(parts).reshape(-1, 3)
+        #     parts = np.array(parts).reshape(-1, 2)
         #     parts[:, 0] = parts[:, 0] * img_w
         #     parts[:, 1] = parts[:, 1] * img_h
-        #     for i, (x, y, v) in enumerate(parts):
-        #         if v:
+        #     for i, (x, y) in enumerate(parts):
+        #         # if v:
         #             part_pt = (int(round(x)), int(round(y)))
         #             cv2.circle(img_canvas, part_pt, 2, (0, 255, 0), thickness=2)
         #             cv2.line(img_canvas, pt1, part_pt, (255, 255, 0), thickness=2, lineType=cv2.LINE_AA)
         # cv2.imwrite("./debug/"+Path(self.img_files[index]).stem+".jpg", img_canvas)
-
-
-        labels_out = torch.zeros((nl, 1+5+2))
-        if nl:
-            labels_out[:, 1:6] = torch.from_numpy(labels)
-            labels_out[:, 6:8] = torch.from_numpy(bh)
-
+        
         # Convert
         img = img.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
         img = np.ascontiguousarray(img)
