@@ -177,6 +177,7 @@ class DetectionValidator(BaseValidator):
         # Calculate stride - check if model is initialized
         gs = max(int(de_parallel(self.model).stride if self.model else 0), 32)
         return create_dataloader(path=dataset_path,
+                                 labels_dir=self.data["labels"],
                                  imgsz=self.args.imgsz,
                                  batch_size=batch_size,
                                  stride=gs,

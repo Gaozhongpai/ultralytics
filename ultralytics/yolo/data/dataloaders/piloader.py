@@ -92,15 +92,16 @@ def exif_transpose(image):
     return image
 
 
-def create_dataloader(path, imgsz, batch_size, stride, hyp=None, augment=False, cache=False, pad=0.0, rect=False, 
+def create_dataloader(path, labels_dir, imgsz, batch_size, stride, hyp=None, augment=False, cache=False, pad=0.0, rect=False, 
                       rank=-1, world_size=1, workers=8, close_mosaic=False, image_weights=False, quad=False, prefix='', shuffle=False, seed=0):
     # Make sure only the first process in DDP process the dataset first, and the following others can use the cache
     with torch_distributed_zero_first(rank):
-        labels_dir = ""
-        if "coco" in path:
-            labels_dir = "yolov5_style_parts"
-        elif "BodyHands" in path:
-            labels_dir = "yolov5_style_hand"
+        # labels_dir = ""
+        # if "coco" in path:
+        #     labels_dir = "yolov5_style_parts"
+        # elif "BodyHands" in path:
+        #     labels_dir = "yolov5_style_hand"
+        # elif 
         dataset = LoadImagesAndLabels(path, labels_dir, imgsz, batch_size,
                                       augment=augment,  # augment images
                                       hyp=hyp,  # augmentation hyperparameters
@@ -628,7 +629,8 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                                                  perspective=hyp['perspective'])
 
         nl = len(labels)  # number of labels
-        while(nl==0):
+        while(nl==0 and mosaic):
+           # print("nl:{}".format(nl))
            img, labels = load_mosaic(self, index) 
            nl = len(labels)
             
@@ -1045,8 +1047,15 @@ def random_perspective(img, targets=(), segments=(), degrees=10, translate=.1, s
 
     return img, targets
 
+def box_candidates(cls, box1, box2, wh_thr=2, ar_thr=20, area_thr=0.1, eps=1e-16):  # box1(4,n), box2(4,n)
+    # Compute candidate boxes: box1 before augment, box2 after augment, wh_thr (pixels), aspect_ratio_thr, area_ratio
+    w1, h1 = box1[2] - box1[0], box1[3] - box1[1]
+    w2, h2 = box2[2] - box2[0], box2[3] - box2[1]
+    ar = np.maximum(w2 / (h2 + eps), h2 / (w2 + eps))  # aspect ratio
+    return (w2 > wh_thr) & (h2 > wh_thr) & (w2 * h2 / (w1 * h1 + eps) > area_thr) & (ar < ar_thr)  # candidates
 
-def box_candidates(cls, box1, box2, wh_thr=10, ar_thr=10, area_thr=0.1, eps=1e-16):  # box1(4,n), box2(4,n)
+
+def box_candidates_v2(cls, box1, box2, wh_thr=10, ar_thr=10, area_thr=0.1, eps=1e-16):  # box1(4,n), box2(4,n)
     # Compute candidate boxes: box1 before augment, box2 after augment, wh_thr (pixels), aspect_ratio_thr, area_ratio
     w1, h1 = box1[2] - box1[0], box1[3] - box1[1]
     w2, h2 = box2[2] - box2[0], box2[3] - box2[1]

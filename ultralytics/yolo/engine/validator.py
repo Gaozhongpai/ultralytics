@@ -161,17 +161,11 @@ class BaseValidator:
             with dt[2]:
                 if self.training:
                     self.loss += trainer.criterion(preds, batch)[1]
-            
+
             # Postprocess
             with dt[3]:
                 preds = self.postprocess(preds)
-            
-            for si in range(len(preds)):
-                preds[si][:, -2:] *= torch.tensor(batch['img'][si].shape[1:], device=self.device)  # to pixels
-                # preds[si][:, -2:] = scale_boxes(batch['img'][si].shape[1:], 
-                #                                 preds[si][:, [-2, -1, -2, -1]], 
-                #                                 batch['ori_shape'][si], 
-                #                                 batch['ratio_pad'][si], False)[:, -2:]  # native-space pred
+
             self.update_metrics(preds, batch)
             if self.args.plots and batch_i < 3:
                 self.plot_val_samples(batch, batch_i)

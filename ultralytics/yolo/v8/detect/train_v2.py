@@ -45,6 +45,7 @@ class DetectionTrainer(BaseTrainer):
         # Calculate stride - check if model is initialized
         gs = max(int(de_parallel(self.model).stride.max() if self.model else 0), 32)
         return create_dataloader(path=dataset_path,
+                                 labels_dir=self.data["labels"],
                                  imgsz=self.args.imgsz,
                                  batch_size=batch_size,
                                  stride=gs,
@@ -273,7 +274,7 @@ class Loss:
         loss[0] *= self.hyp.box  # box gain
         loss[1] *= self.hyp.cls  # cls gain
         loss[2] *= self.hyp.dfl  # dfl gain
-        loss[3] *= self.hyp.bh / 20 # rot gain
+        loss[3] *= self.hyp.bh / 10 # rot gain
 
         return loss.sum() * batch_size, loss.detach()  # loss(box, cls, dfl)
 

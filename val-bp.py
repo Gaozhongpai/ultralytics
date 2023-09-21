@@ -213,7 +213,7 @@ def run(opt, data,
         half=True
         # Load model
         
-        model = YOLO('yolov8l.yaml').load(weights)
+        model = YOLO(weights) # .load(weights)
         model = AutoBackend(model.model, device=device, dnn=False, data=None, fp16=half)
         stride, pt, jit, engine = model.stride, model.pt, model.jit, model.engine            
         imgsz = check_img_size(imgsz, s=stride)  # check image size
@@ -256,7 +256,7 @@ def run(opt, data,
         if device.type != 'cpu':
             model(torch.zeros(1, 3, imgsz, imgsz).to(device).type_as(next(model.parameters())))  # run once
         task = task if task in ('train', 'val', 'test') else 'val'  # path to train/val/test images
-        dataloader = create_dataloader(data[task], imgsz, batch_size, gs, 
+        dataloader = create_dataloader(data[task], data['labels'], imgsz, batch_size, gs, 
                                        pad=pad, rect=rect, quad=True, prefix=colorstr(f'{task}: '))[0]
 
     color = Colors()
@@ -264,6 +264,9 @@ def run(opt, data,
     mp, mr, map50, mAP, mAP_part, map50_part, t0, t1, t2 = 0., 0., 0., 0., 0., 0., 0., 0., 0.
     loss = torch.zeros(4, device=device)
     json_dump, json_dump_part_coco, json_dump_part_mr = [], [], []
+    
+    if data['dataset'] == "HumanParts":  # for map_sub cal (Subordination Metric) defined by Hier-R-CNN
+        json_dump_part_coco_sub = []
     
     pbar = tqdm(dataloader, desc='Processing {} images'.format(task))
     for batch_i, (imgs, targets, paths, shapes) in enumerate(pbar):

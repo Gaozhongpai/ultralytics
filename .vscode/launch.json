@@ -11,9 +11,9 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "justMyCode": true,
-            // "args": ["--rect", "--data", "ultralytics/yolo/data/datasets/JointBP_BodyHands.yaml", "--img", "640", // val-bp bodyhand
-            //          "--weights", "runs/detect/BodyHand5/weights/best.pt",
-            //          "--batch-size", "8", "--device", "0"]
+            "args": ["--rect", "--data", "ultralytics/yolo/data/datasets/JointBP_CrowdHuman_face.yaml", "--img", "1536", // val-bp bodyhand
+                     "--weights", "runs/detect/CrowdHuman-yolov5l6-1536r/weights/best.pt",
+                     "--batch-size", "8", "--device", "0"]
         }
     ]
 }
